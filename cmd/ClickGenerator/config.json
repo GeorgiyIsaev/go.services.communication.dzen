@@ -1,0 +1,10 @@
+{
+  "target_url": "http://localhost:8080/click",
+  "author_id_start": 1,
+  "author_id_end": 20,
+  "reader_id_start": 1,
+  "reader_id_end": 100,
+  "min_reads": 1,
+  "max_reads": 10,
+  "delay_between_reads_sec": 1
+}
