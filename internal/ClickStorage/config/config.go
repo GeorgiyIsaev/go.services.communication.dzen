@@ -14,7 +14,8 @@ type Config struct {
 	DBUser     string
 	DBPassword string
 	DBName     string
-	StatsURL   string // URL внешнего сервиса /stats
+	StatsURL   string
+	ServerPort string // новый параметр
 }
 
 func Load() *Config {
@@ -29,6 +30,7 @@ func Load() *Config {
 		DBPassword: getEnv("DB_PASSWORD", ""),
 		DBName:     getEnv("DB_NAME", "StatsKeeper"),
 		StatsURL:   getEnv("STATS_SERVICE_URL", "http://external-service/stats"),
+		ServerPort: getEnv("SERVER_PORT", "8084"), // по умолчанию 8084
 	}
 }
 

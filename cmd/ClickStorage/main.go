@@ -43,7 +43,7 @@ func main() {
 	mux.HandleFunc("POST /update", h.UpdateHandler)
 
 	srv := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":8084",
 		Handler: mux,
 	}
 

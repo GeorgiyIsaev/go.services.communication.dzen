@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: click_analytics_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: click_analytics
+    ports:
+      - "5434:5432"   # хост:контейнер
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: click_analytics_app
+    environment:
+      DB_HOST: db               # имя сервиса в compose
+      DB_PORT: 5432             # внутренний порт контейнера
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: click_analytics
+      SERVER_PORT: 8084
+      STATS_SERVICE_URL: "http://external-service/stats" # при необходимости измените
+    ports:
+      - "8084:8084"             # хост:контейнер
+    depends_on:
+      - db
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
