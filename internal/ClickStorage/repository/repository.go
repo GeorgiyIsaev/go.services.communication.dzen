@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -41,26 +42,31 @@ func (r *repo) GetAuthors(ctx context.Context) ([]int, error) {
 }
 
 func (r *repo) SaveStats(ctx context.Context, authorID int, date time.Time, clicks int) error {
+	log.Printf("DB: saving stats author=%d date=%s clicks=%d", authorID, date.Format("2006-01-02"), clicks)
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO stats (author_id, date, clicks) VALUES ($1, $2, $3)
 		 ON CONFLICT (author_id, date) DO UPDATE SET clicks = EXCLUDED.clicks`,
 		authorID, date, clicks,
 	)
 	if err != nil {
+		log.Printf("DB: error saving stats author=%d date=%s: %v", authorID, date.Format("2006-01-02"), err)
 		return fmt.Errorf("save stats: %w", err)
 	}
+	log.Printf("DB: successfully saved stats author=%d date=%s", authorID, date.Format("2006-01-02"))
 	return nil
 }
 
 func (r *repo) StatsExistForDate(ctx context.Context, date time.Time) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM stats WHERE date = $1 LIMIT 1`, date,
+		`SELECT COUNT(*) FROM stats WHERE date = $1`, date,
 	).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("check stats exist: %w", err)
 	}
-	return count > 0, nil
+	exists := count > 0
+	log.Printf("DB: stats for date %s exist? %v (count=%d)", date.Format("2006-01-02"), exists, count)
+	return exists, nil
 }
 
 func (r *repo) GetStatsForDate(ctx context.Context, date time.Time) (map[int]int, error) {

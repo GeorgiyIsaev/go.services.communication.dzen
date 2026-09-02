@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -25,7 +26,6 @@ func (h *Handler) GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	var date time.Time
 	var err error
 	if dateStr == "" {
-		// По умолчанию вчера
 		date = time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)
 	} else {
 		date, err = time.Parse("2006-01-02", dateStr)
@@ -34,10 +34,11 @@ func (h *Handler) GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	log.Printf("Handler: GET /stats for date %s", date.Format("2006-01-02"))
 
-	// Получаем статистику из БД (простой запрос, можно реализовать в репозитории)
 	stats, err := h.repo.GetStatsForDate(r.Context(), date)
 	if err != nil {
+		log.Printf("Handler: error getting stats: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -49,7 +50,9 @@ func (h *Handler) GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 // POST /update
 func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	yesterday := time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)
+	log.Printf("Handler: POST /update for date %s", yesterday.Format("2006-01-02"))
 	if err := h.service.UpdateStatsForDate(r.Context(), yesterday); err != nil {
+		log.Printf("Handler: update failed: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

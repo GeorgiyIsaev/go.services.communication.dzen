@@ -30,7 +30,7 @@ func Load() *Config {
 		DBPassword: getEnv("DB_PASSWORD", ""),
 		DBName:     getEnv("DB_NAME", "StatsKeeper"),
 		StatsURL:   getEnv("STATS_SERVICE_URL", "http://external-service/stats"),
-		ServerPort: getEnv("SERVER_PORT", "8084"), // по умолчанию 8084
+		ServerPort: getEnv("SERVER_PORT4", "8084"), // по умолчанию 8084
 	}
 }
 

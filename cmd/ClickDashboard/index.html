@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Аналитика кликов</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .controls { margin-bottom: 20px; }
+        .controls label { margin-right: 10px; }
+        .controls input { width: 60px; margin-right: 10px; }
+        table { border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: center; }
+        th { background-color: #f4f4f4; }
+        .author-col { text-align: left; }
+        .no-data { color: #999; margin-top: 20px; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+<h1>Аналитика кликов</h1>
+<div class="controls">
+    <label for="daysInput">Количество дней:</label>
+    <input type="number" id="daysInput" value="5" min="1">
+    <button id="refreshBtn">Обновить данные</button>
+</div>
+<div id="tableContainer"></div>
+<div id="errorMsg" class="error"></div>
+
+<script>
+    const API_BASE = 'http://localhost:8085';
+
+    document.getElementById('refreshBtn').addEventListener('click', function() {
+        const days = document.getElementById('daysInput').value;
+        if (!days || parseInt(days) < 1) {
+            document.getElementById('errorMsg').textContent = 'Введите положительное число дней.';
+            return;
+        }
+        document.getElementById('errorMsg').textContent = '';
+
+        fetch(`${API_BASE}/stats?days=${encodeURIComponent(days)}`)
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        throw new Error(`Ошибка ${response.status}: ${text}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => buildTable(data))
+            .catch(err => {
+                document.getElementById('errorMsg').textContent = 'Ошибка: ' + err.message;
+                document.getElementById('tableContainer').innerHTML = '';
+            });
+    });
+
+    function buildTable(data) {
+        const container = document.getElementById('tableContainer');
+        if (!data.dates || data.dates.length === 0) {
+            container.innerHTML = '<div class="no-data">Нет данных за указанный период.</div>';
+            return;
+        }
+
+        let html = '<table>';
+        // Заголовок
+        html += '<thead><tr><th>Автор</th>';
+        data.dates.forEach(date => {
+            html += `<th>${date}</th>`;
+        });
+        html += '</tr></thead>';
+
+        // Тело
+        html += '<tbody>';
+        data.authors.forEach(author => {
+            html += '<tr>';
+            html += `<td class="author-col">${author.name}</td>`;
+            author.clicks.forEach(clicks => {
+                html += `<td>${clicks}</td>`;
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+
+        container.innerHTML = html;
+    }
+
+    // Автоматическая загрузка при открытии страницы
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('refreshBtn').click();
+    });
+</script>
+</body>
+</html>
