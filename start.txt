@@ -1,5 +1,11 @@
-docker-compose up --build
+# Первый запуск (создаются тома)
+docker-compose up -d
 
-docker-compose up db
+# Остановка контейнеров (тома остаются)
+docker-compose down
 
-docker-compose up -d --build
+# Повторный запуск – данные сохраняются
+docker-compose up -d
+
+# Удалить тома вместе с контейнерами (очистить данные)
+docker-compose down -v

@@ -1,6 +1,89 @@
-version: '3.8'
+# docker-compose.yml
+name: communication_services
 
 services:
+  kafka1:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka1
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:9099,2@kafka2:9099,3@kafka3:9099'
+      KAFKA_LISTENERS: 'INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9099'
+      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka1:19092,EXTERNAL://localhost:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    networks:
+      - kafka-net
+    volumes:
+      - kafka1_data:/var/lib/kafka/data
+
+  kafka2:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka2
+    ports:
+      - "9093:9093"
+    environment:
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:9099,2@kafka2:9099,3@kafka3:9099'
+      KAFKA_LISTENERS: 'INTERNAL://:19093,EXTERNAL://:9093,CONTROLLER://:9099'
+      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka2:19093,EXTERNAL://localhost:9093'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    networks:
+      - kafka-net
+    volumes:
+      - kafka2_data:/var/lib/kafka/data
+
+  kafka3:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka3
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:9099,2@kafka2:9099,3@kafka3:9099'
+      KAFKA_LISTENERS: 'INTERNAL://:19094,EXTERNAL://:9094,CONTROLLER://:9099'
+      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka3:19094,EXTERNAL://localhost:9094'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    networks:
+      - kafka-net
+    volumes:
+      - kafka3_data:/var/lib/kafka/data
+
+  # Опционально: веб-интерфейс для Kafka
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8182:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: 'kafka1:19092,kafka2:19093,kafka3:19094'
+    depends_on:
+      - kafka1
+      - kafka2
+      - kafka3
+    networks:
+      - kafka-net
+
   db:
     image: postgres:15-alpine
     container_name: click_analytics_db
@@ -9,28 +92,19 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: click_analytics
     ports:
-      - "5434:5432"   # хост:контейнер
+      - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    networks:
+      - kafka-net
 
-  app:
-    build: .
-    container_name: click_analytics_app
-    environment:
-      DB_HOST: db               # имя сервиса в compose
-      DB_PORT: 5432             # внутренний порт контейнера
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: click_analytics
-      SERVER_PORT: 8084
-      STATS_SERVICE_URL: "http://external-service/stats" # при необходимости измените
-    ports:
-      - "8084:8084"             # хост:контейнер
-    depends_on:
-      - db
-    restart: unless-stopped
-
+networks:
+  kafka-net:
+    driver: bridge
 
 volumes:
+  kafka1_data:
+  kafka2_data:
+  kafka3_data:
   postgres_data:
