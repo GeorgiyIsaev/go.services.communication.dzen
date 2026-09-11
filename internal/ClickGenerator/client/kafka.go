@@ -46,7 +46,7 @@ func (k *KafkaClickSender) Send(ctx context.Context, req domain.ClickRequest) er
 	}
 
 	// Ключ = UserID. Это позволяет Kafka раскладывать клики одного пользователя в одну партицию.
-	key := []byte(strconv.FormatInt(req.UserID, 10))
+	key := []byte(strconv.FormatInt(req.AuthorID, 10))
 
 	msg := kafka.Message{
 		Key:   key,
