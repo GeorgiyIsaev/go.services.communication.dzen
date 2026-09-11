@@ -1,0 +1,8 @@
+{
+  "kafka_brokers": ["localhost:9092"],
+  "kafka_topic": "clicks",
+  "kafka_partitions": 8,
+  "kafka_replication_factor": 1,
+  "scenario_dir": "internal/ClickScenario/scenario",
+  "delay_between_reads_sec": 0
+}
