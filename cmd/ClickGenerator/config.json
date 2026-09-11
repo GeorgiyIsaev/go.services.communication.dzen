@@ -1,10 +1,13 @@
 {
-  "target_url": "http://localhost:8080/click",
+  "kafka_brokers": ["localhost:9092"],
+  "kafka_topic": "clicks",
+  "kafka_partitions": 8,
+  "kafka_replication_factor": 1,
   "author_id_start": 1,
   "author_id_end": 20,
   "reader_id_start": 1,
-  "reader_id_end": 100,
-  "min_reads": 1,
-  "max_reads": 10,
+  "reader_id_end": 1000,
+  "min_reads": 10,
+  "max_reads": 100,
   "delay_between_reads_sec": 1
 }

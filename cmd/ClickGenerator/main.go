@@ -11,10 +11,6 @@ import (
 )
 
 func main() {
-	Run()
-}
-
-func Run() {
 	cfgFile, err := os.Open("cmd/ClickGenerator/config.json")
 	if err != nil {
 		log.Fatalf("Не удалось открыть config.json: %v", err)
@@ -26,10 +22,28 @@ func Run() {
 		log.Fatalf("Не удалось распарсить config.json: %v", err)
 	}
 
-	// client: создаем конкретную реализацию отправщика
-	httpSender := client.NewHTTPClickSender(cfg.TargetURL)
+	// Гарантируем, что топик существует с нужным числом партиций
+	if err := client.EnsureTopic(
+		cfg.KafkaBrokers,
+		cfg.KafkaTopic,
+		cfg.KafkaPartitions,
+		cfg.KafkaReplicationFactor,
+	); err != nil {
+		log.Fatalf("Не удалось создать/проверить топик: %v", err)
+	}
+	log.Printf("Топик %q готов (%d партиций, RF=%d)",
+		cfg.KafkaTopic, cfg.KafkaPartitions, cfg.KafkaReplicationFactor)
 
-	// UseCase: передаем в симулятор только интерфейс из domain (Dependency Inversion)
-	sim := usecase.NewSimulator(cfg, httpSender)
+	kafkaSender, err := client.NewKafkaClickSender(cfg.KafkaBrokers, cfg.KafkaTopic)
+	if err != nil {
+		log.Fatalf("Не удалось создать Kafka sender: %v", err)
+	}
+	defer func() {
+		if err := kafkaSender.Close(); err != nil {
+			log.Printf("Ошибка закрытия Kafka writer: %v", err)
+		}
+	}()
+
+	sim := usecase.NewSimulator(cfg, kafkaSender)
 	sim.Run()
 }
