@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,9 @@ type Simulator struct {
 }
 
 func NewSimulator(cfg domain.Config, sender domain.ClickSender, scenarios []domain.Scenario) *Simulator {
+	if cfg.MaxRetries <= 0 {
+		cfg.MaxRetries = 1
+	}
 	return &Simulator{
 		cfg:          cfg,
 		sender:       sender,
@@ -29,13 +33,18 @@ func NewSimulator(cfg domain.Config, sender domain.ClickSender, scenarios []doma
 
 // Run запускает по одной горутине на каждого пользователя из сценариев.
 // Все пользователи работают параллельно, каждый — независимо.
-func (s *Simulator) Run() {
+func (s *Simulator) Run(ctx context.Context) {
 	fmt.Printf("Запуск сценариев. Всего пользователей: %d\n", s.totalReaders)
 
 	var mainWg sync.WaitGroup
 	for _, sc := range s.scenarios {
 		mainWg.Add(1)
-		go s.runReaderGoroutine(sc, &mainWg)
+		go s.runReaderGoroutine(ctx, sc, &mainWg)
+	}
+
+	if ctx.Err() != nil {
+		fmt.Println("Сценарии прерваны. Программа завершает работу.")
+		return
 	}
 
 	mainWg.Wait()
@@ -45,7 +54,7 @@ func (s *Simulator) Run() {
 // runReaderGoroutine — горутина одного пользователя.
 // Читает авторов строго в порядке, заданном в слайсе сценария,
 // но каждое чтение запускает в отдельной внутренней горутине.
-func (s *Simulator) runReaderGoroutine(sc domain.Scenario, mainWg *sync.WaitGroup) {
+func (s *Simulator) runReaderGoroutine(ctx context.Context, sc domain.Scenario, mainWg *sync.WaitGroup) {
 	defer mainWg.Done()
 
 	defer func() {
@@ -60,28 +69,43 @@ func (s *Simulator) runReaderGoroutine(sc domain.Scenario, mainWg *sync.WaitGrou
 		readWg.Add(1)
 		go func(aID int64) {
 			defer readWg.Done()
-			req := domain.ClickRequest{UserID: sc.UserID, AuthorID: aID}
-			s.sendWithRetry(req)
+			req := domain.ClickRequest{
+				UserID:   sc.UserID,
+				AuthorID: aID,
+			}
+			s.sendWithRetry(ctx, req)
 		}(authorID)
 
 		if s.cfg.DelayBetweenReadsSec > 0 {
-			time.Sleep(time.Duration(s.cfg.DelayBetweenReadsSec) * time.Second)
+			delay := time.Duration(s.cfg.DelayBetweenReadsSec) * time.Second
+			if !sleepWithContext(ctx, delay) {
+				break
+			}
 		}
 	}
 
 	readWg.Wait()
 }
 
-func (s *Simulator) sendWithRetry(req domain.ClickRequest) {
-	maxRetries := 5
+func (s *Simulator) sendWithRetry(ctx context.Context, req domain.ClickRequest) {
+	maxRetries := s.cfg.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
 	backoff := 500 * time.Millisecond
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := s.sender.Send(ctx, req)
+		sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := s.sender.Send(sendCtx, req)
 		cancel()
 
 		if err == nil {
+			return
+		}
+
+		if ctx.Err() != nil {
+			fmt.Printf("[WARN] Отправка прервана (User: %d, Author: %d): %v\n",
+				req.UserID, req.AuthorID, ctx.Err())
 			return
 		}
 
@@ -89,11 +113,32 @@ func (s *Simulator) sendWithRetry(req domain.ClickRequest) {
 			req.UserID, req.AuthorID, attempt, maxRetries, err)
 
 		if attempt < maxRetries {
-			time.Sleep(backoff)
+			half := int64(backoff / 2)
+			jitter := time.Duration(0)
+			if half > 0 {
+				jitter = time.Duration(rand.Int63n(half))
+			}
+
+			if !sleepWithContext(ctx, backoff+jitter) {
+				return
+			}
+
 			backoff *= 2
 		}
 	}
 
 	fmt.Printf("[ERROR] Клик окончательно не доставлен после %d попыток (User: %d, Author: %d)\n",
 		maxRetries, req.UserID, req.AuthorID)
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

@@ -17,6 +17,7 @@ type Config struct {
 	KafkaReplicationFactor int      `json:"kafka_replication_factor"`
 	ScenarioDir            string   `json:"scenario_dir"`
 	DelayBetweenReadsSec   int      `json:"delay_between_reads_sec"`
+	MaxRetries             int      `json:"max_retries"`
 }
 
 // ClickSender контракт на отправку клика (порт)

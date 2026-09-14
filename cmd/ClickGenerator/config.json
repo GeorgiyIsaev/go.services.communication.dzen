@@ -1,5 +1,9 @@
 {
-  "kafka_brokers": ["localhost:9092"],
+  "kafka_brokers": [
+    "localhost:9092",
+    "localhost:9093",
+    "localhost:9094"
+  ],
   "kafka_topic": "clicks",
   "kafka_partitions": 8,
   "kafka_replication_factor": 3,
