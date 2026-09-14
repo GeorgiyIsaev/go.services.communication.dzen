@@ -19,6 +19,7 @@ type Config struct {
 	MinReads               int      `json:"min_reads"`
 	MaxReads               int      `json:"max_reads"`
 	DelayBetweenReadsSec   int      `json:"delay_between_reads_sec"`
+	MaxRetries             int      `json:"max_retries"`
 }
 
 // ClickSender контракт на отправку клика (порт)

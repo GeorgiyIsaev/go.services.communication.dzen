@@ -29,21 +29,21 @@ func NewSimulator(cfg domain.Config, sender domain.ClickSender) *Simulator {
 	}
 }
 
-func (s *Simulator) Run() {
+func (s *Simulator) Run(ctx context.Context) {
 	fmt.Printf("Запуск симуляции. Всего пользователей: %d\n", s.totalReaders)
 
 	var mainWg sync.WaitGroup
 
 	for readerID := s.cfg.ReaderIDStart; readerID <= s.cfg.ReaderIDEnd; readerID++ {
 		mainWg.Add(1)
-		go s.runReaderGoroutine(readerID, &mainWg)
+		go s.runReaderGoroutine(ctx, readerID, &mainWg)
 	}
 
 	mainWg.Wait()
 	fmt.Println("Все горутины успешно завершены. Программа завершает работу.")
 }
 
-func (s *Simulator) runReaderGoroutine(readerID int64, mainWg *sync.WaitGroup) {
+func (s *Simulator) runReaderGoroutine(ctx context.Context, readerID int64, mainWg *sync.WaitGroup) {
 	defer mainWg.Done()
 
 	defer func() {
@@ -51,21 +51,26 @@ func (s *Simulator) runReaderGoroutine(readerID int64, mainWg *sync.WaitGroup) {
 		fmt.Printf("Горутина Завершена %d из %d (User ID: %d)\n", completed, s.totalReaders, readerID)
 	}()
 
-	numReads := s.rng.Intn(s.cfg.MaxReads-s.cfg.MinReads+1) + s.cfg.MinReads
+	numReads := rand.Intn(s.cfg.MaxReads-s.cfg.MinReads+1) + s.cfg.MinReads
 	var readWg sync.WaitGroup
 
 	for i := 0; i < numReads; i++ {
-		authorID := s.rng.Int63n(s.cfg.AuthorIDEnd-s.cfg.AuthorIDStart+1) + s.cfg.AuthorIDStart
+		authorID := rand.Int63n(s.cfg.AuthorIDEnd-s.cfg.AuthorIDStart+1) + s.cfg.AuthorIDStart
 
 		readWg.Add(1)
 		go func(aID int64) {
 			defer readWg.Done()
 			req := domain.ClickRequest{UserID: readerID, AuthorID: aID}
-			s.sendWithRetry(req)
+			s.sendWithRetry(ctx, req)
 		}(authorID)
 
 		if s.cfg.DelayBetweenReadsSec > 0 {
-			time.Sleep(time.Duration(s.cfg.DelayBetweenReadsSec) * time.Second)
+			select {
+			case <-time.After(time.Duration(s.cfg.DelayBetweenReadsSec) * time.Second):
+			case <-ctx.Done():
+				readWg.Wait()
+				return
+			}
 		}
 	}
 
@@ -73,13 +78,21 @@ func (s *Simulator) runReaderGoroutine(readerID int64, mainWg *sync.WaitGroup) {
 	readWg.Wait()
 }
 
-func (s *Simulator) sendWithRetry(req domain.ClickRequest) {
-	maxRetries := 5
+func (s *Simulator) sendWithRetry(ctx context.Context, req domain.ClickRequest) {
+	maxRetries := s.cfg.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
 	backoff := 500 * time.Millisecond
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := s.sender.Send(ctx, req)
+		if err := ctx.Err(); err != nil {
+			fmt.Printf("[INFO] Отправка прервана (User: %d, Author: %d): %v\n", req.UserID, req.AuthorID, err)
+			return
+		}
+
+		sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := s.sender.Send(sendCtx, req)
 		cancel()
 
 		if err == nil {
@@ -90,7 +103,13 @@ func (s *Simulator) sendWithRetry(req domain.ClickRequest) {
 			req.UserID, req.AuthorID, attempt, maxRetries, err)
 
 		if attempt < maxRetries {
-			time.Sleep(backoff)
+			jitter := time.Duration(rand.Int63n(int64(backoff/2) + 1))
+			select {
+			case <-time.After(backoff + jitter):
+			case <-ctx.Done():
+				fmt.Printf("[INFO] Ретрай прерван (User: %d, Author: %d): %v\n", req.UserID, req.AuthorID, ctx.Err())
+				return
+			}
 			backoff *= 2 // Экспоненциальное увеличение задержки (Exponential Backoff)
 		}
 	}

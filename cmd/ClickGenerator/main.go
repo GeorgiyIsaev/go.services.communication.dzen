@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"go.services.communication.dzen/internal/ClickGenerator/client"
 	"go.services.communication.dzen/internal/ClickGenerator/domain"
@@ -11,6 +14,9 @@ import (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	cfgFile, err := os.Open("cmd/ClickGenerator/config.json")
 	if err != nil {
 		log.Fatalf("Не удалось открыть config.json: %v", err)
@@ -45,5 +51,7 @@ func main() {
 	}()
 
 	sim := usecase.NewSimulator(cfg, kafkaSender)
-	sim.Run()
+	sim.Run(ctx)
+
+	log.Println("Завершение работы.")
 }
