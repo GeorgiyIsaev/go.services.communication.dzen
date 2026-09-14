@@ -33,7 +33,7 @@ func NewKafkaClickSender(brokers []string, topic string) (*KafkaClickSender, err
 		Async:                  false,
 		WriteTimeout:           5 * time.Second,
 		ReadTimeout:            5 * time.Second,
-		AllowAutoTopicCreation: true,
+		AllowAutoTopicCreation: false,
 	}
 
 	return &KafkaClickSender{writer: w}, nil

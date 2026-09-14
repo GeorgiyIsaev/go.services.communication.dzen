@@ -42,12 +42,12 @@ func (s *Simulator) Run(ctx context.Context) {
 		go s.runReaderGoroutine(ctx, sc, &mainWg)
 	}
 
+	mainWg.Wait()
 	if ctx.Err() != nil {
 		fmt.Println("Сценарии прерваны. Программа завершает работу.")
 		return
 	}
 
-	mainWg.Wait()
 	fmt.Println("Все сценарии выполнены. Программа завершает работу.")
 }
 

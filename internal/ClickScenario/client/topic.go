@@ -31,9 +31,9 @@ func EnsureTopic(brokers []string, topic string, partitions, replicationFactor i
 		DualStack: true,
 	}
 
-	conn, err := dialer.Dial("tcp", brokers[0])
+	conn, err := dialAnyBroker(dialer, brokers)
 	if err != nil {
-		return fmt.Errorf("не удалось подключиться к брокеру %s: %w", brokers[0], err)
+		return err
 	}
 	defer conn.Close()
 
@@ -57,13 +57,42 @@ func EnsureTopic(brokers []string, topic string, partitions, replicationFactor i
 		},
 	}
 
-	err = controllerConn.CreateTopics(topicConfigs...)
-	if err != nil {
-		if errors.Is(err, kafka.TopicAlreadyExists) {
+	if err := controllerConn.CreateTopics(topicConfigs...); err != nil {
+		if isTopicAlreadyExists(err) {
 			return nil
 		}
 		return fmt.Errorf("ошибка создания топика %q: %w", topic, err)
 	}
-
 	return nil
+}
+
+func dialAnyBroker(dialer *kafka.Dialer, brokers []string) (*kafka.Conn, error) {
+	var conn *kafka.Conn
+	var lastErr error
+
+	for _, addr := range brokers {
+		conn, lastErr = dialer.Dial("tcp", addr)
+		if lastErr == nil {
+			return conn, nil
+		}
+	}
+
+	return nil, fmt.Errorf("не удалось подключиться ни к одному брокеру из %v: %w", brokers, lastErr)
+}
+
+func isTopicAlreadyExists(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, kafka.TopicAlreadyExists) {
+		return true
+	}
+
+	var kerr kafka.Error
+	if errors.As(err, &kerr) && kerr == kafka.TopicAlreadyExists {
+		return true
+	}
+
+	return false
 }
