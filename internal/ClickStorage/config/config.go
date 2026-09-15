@@ -27,9 +27,9 @@ func Load() *Config {
 		DBPort:     getEnv("DB_PORT", "5432"),
 		DBUser:     getEnv("DB_USER", "postgres"),
 		DBPassword: getEnv("DB_PASSWORD", ""),
-		DBName:     getEnv("DB_NAME", "StatsKeeper"),
+		DBName:     getEnv("DB_NAME", "click_analytics"),
 		StatsURL:   getEnv("STATS_SERVICE_URL", "http://external-service/stats"),
-		ServerPort: getEnv("SERVER_PORT4", "8084"), // по умолчанию 8084
+		ServerPort: getEnv("PORT_CLICK_STORAGE", "8084"), // по умолчанию 8084
 	}
 }
 

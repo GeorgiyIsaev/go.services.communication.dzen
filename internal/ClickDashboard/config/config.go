@@ -19,9 +19,9 @@ func Load() *Config {
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnvAsInt("DB_PORT", 5434),
 		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", "postgres"),
+		DBPassword: getEnv("DB_PASSWORD", ""),
 		DBName:     getEnv("DB_NAME", "click_analytics"),
-		ServerPort: getEnv("SERVER_PORT5", "8085"),
+		ServerPort: getEnv("PORT_CLICK_DASHBOARD", "8085"),
 	}
 }
 
