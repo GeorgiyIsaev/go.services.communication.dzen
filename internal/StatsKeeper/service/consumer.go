@@ -31,7 +31,7 @@ func NewConsumer(brokers []string, topic, groupID string, tracker *Tracker) *Con
 		MinBytes:       1,
 		MaxBytes:       10e6, // 10 MB
 		MaxWait:        500 * time.Millisecond,
-		CommitInterval: time.Second, // авто-коммит офсетов
+		CommitInterval: 0, // отключить авто-коммит офсетов
 		StartOffset:    kafka.FirstOffset,
 	})
 	return &Consumer{reader: reader, tracker: tracker}
@@ -57,13 +57,20 @@ func (c *Consumer) Run(ctx context.Context) error {
 			continue
 		}
 
+		if m.UserID <= 0 || m.AuthorID <= 0 {
+			log.Printf("invalid ids on topic=%s partition=%d offset=%d: user_id=%d author_id=%d",
+				msg.Topic, msg.Partition, msg.Offset, m.UserID, m.AuthorID)
+			continue
+		}
 		// Используем время из сообщения, а не time.Now():
-		// так клики, пришедшие с лагом, попадают в нужный день.
 		at := msg.Time
 		if at.IsZero() {
 			at = time.Now()
 		}
 		c.tracker.AddClickAt(m.AuthorID, m.UserID, at)
+		if err := c.reader.CommitMessages(ctx, msg); err != nil {
+			log.Printf("commit error: %v", err)
+		}
 	}
 }
 

@@ -34,7 +34,7 @@ func main() {
 
 	http.HandleFunc("/stats", handlers.StatsHandler(tracker))
 	go func() {
-		log.Println("Server starting on :/s", port)
+		log.Printf("Server starting on %s", port)
 		if err := http.ListenAndServe(port, nil); err != nil &&
 			err != http.ErrServerClosed {
 			log.Fatal(err)
