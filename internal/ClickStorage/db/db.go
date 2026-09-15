@@ -1,4 +1,3 @@
-// internal/StatsKeeper/db/db.go
 package db
 
 import (

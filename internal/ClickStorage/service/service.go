@@ -1,4 +1,3 @@
-// internal/StatsKeeper/service/service.go
 package service
 
 import (
@@ -11,17 +10,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"go.services.communication.dzen/internal/ClickStorage/repository"
 )
 
+type Repository interface {
+	GetAuthors(ctx context.Context) ([]int, error)
+	SaveStatsBatch(ctx context.Context, date time.Time, stats map[int]int) error
+	StatsExistForDate(ctx context.Context, date time.Time) (bool, error)
+	GetStatsForDate(ctx context.Context, date time.Time) (map[int]int, error)
+}
+
 type Service struct {
-	repo       repository.Repository
+	repo       Repository
 	httpClient *http.Client
 	statsURL   string
 }
 
-func New(repo repository.Repository, statsURL string) *Service {
+func New(repo Repository, statsURL string) *Service {
 	return &Service{
 		repo:       repo,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
@@ -110,9 +114,13 @@ func (s *Service) UpdateStatsForDate(ctx context.Context, date time.Time) error 
 			continue
 		}
 		log.Printf("Service: saving author %d clicks %d for date %s", authorID, clicks, date.Format("2006-01-02"))
-		if err := s.repo.SaveStats(ctx, authorID, date, clicks); err != nil {
-			log.Printf("Service: error saving stats for author %d: %v", authorID, err)
-			return fmt.Errorf("save stats for author %d: %w", authorID, err)
+		raw := make(map[int]int)
+		for _, item := range response.Stats {
+			raw[item.AuthorID] = item.Count
+		}
+
+		if err := s.repo.SaveStatsBatch(ctx, date, raw); err != nil {
+			return fmt.Errorf("save stats batch: %w", err)
 		}
 	}
 	log.Printf("Service: successfully updated stats for %s", date.Format("2006-01-02"))

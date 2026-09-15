@@ -6,56 +6,48 @@ import (
 	"net/http"
 	"time"
 
-	"go.services.communication.dzen/internal/ClickStorage/repository"
 	"go.services.communication.dzen/internal/ClickStorage/service"
 )
 
-type Handler struct {
-	repo    repository.Repository
-	service *service.Service
+type StatsResponse struct {
+	Stats []AuthorStat `json:"stats"`
 }
 
-func New(repo repository.Repository, svc *service.Service) *Handler {
-	return &Handler{repo: repo, service: svc}
+type AuthorStat struct {
+	AuthorID int `json:"author_id"`
+	Count    int `json:"count"`
+}
+
+type Handler struct {
+	repo service.Repository
+}
+
+func New(repo service.Repository) *Handler {
+	return &Handler{repo: repo}
 }
 
 // GetStatsHandler возвращает статистику за указанную дату (по умолчанию за вчера).
-// GET /stats?date=2025-01-01
+// GET /stats
 func (h *Handler) GetStatsHandler(w http.ResponseWriter, r *http.Request) {
-	dateStr := r.URL.Query().Get("date")
-	var date time.Time
-	var err error
-	if dateStr == "" {
-		date = time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)
-	} else {
-		date, err = time.Parse("2006-01-02", dateStr)
-		if err != nil {
-			http.Error(w, "invalid date format, use YYYY-MM-DD", http.StatusBadRequest)
-			return
-		}
-	}
-	log.Printf("Handler: GET /stats for date %s", date.Format("2006-01-02"))
+	now := time.Now()
+	y, m, d := now.AddDate(0, 0, -1).Date()
+	yesterday := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	log.Printf("Handler: GET /stats for date %s", yesterday.Format("2006-01-02"))
 
-	stats, err := h.repo.GetStatsForDate(r.Context(), date)
+	stats, err := h.repo.GetStatsForDate(r.Context(), yesterday)
 	if err != nil {
 		log.Printf("Handler: error getting stats: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
-}
 
-// UpdateHandler принудительно обновляет статистику за вчерашний день.
-// POST /update
-func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
-	yesterday := time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)
-	log.Printf("Handler: POST /update for date %s", yesterday.Format("2006-01-02"))
-	if err := h.service.UpdateStatsForDate(r.Context(), yesterday); err != nil {
-		log.Printf("Handler: update failed: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	resp := StatsResponse{Stats: make([]AuthorStat, 0, len(stats))}
+	for id, count := range stats {
+		resp.Stats = append(resp.Stats, AuthorStat{AuthorID: id, Count: count})
 	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("Stats updated for " + yesterday.Format("2006-01-02")))
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("Handler: encode error: %v", err)
+	}
 }

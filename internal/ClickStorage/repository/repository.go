@@ -6,20 +6,15 @@ import (
 	"fmt"
 	"log"
 	"time"
-)
 
-type Repository interface {
-	GetAuthors(ctx context.Context) ([]int, error)
-	SaveStats(ctx context.Context, authorID int, date time.Time, clicks int) error
-	StatsExistForDate(ctx context.Context, date time.Time) (bool, error)
-	GetStatsForDate(ctx context.Context, date time.Time) (map[int]int, error)
-}
+	"go.services.communication.dzen/internal/ClickStorage/service"
+)
 
 type repo struct {
 	db *sql.DB
 }
 
-func New(db *sql.DB) Repository {
+func New(db *sql.DB) service.Repository {
 	return &repo{db: db}
 }
 
@@ -87,4 +82,33 @@ func (r *repo) GetStatsForDate(ctx context.Context, date time.Time) (map[int]int
 		result[authorID] = clicks
 	}
 	return result, rows.Err()
+}
+
+func (r *repo) SaveStatsBatch(ctx context.Context, date time.Time, stats map[int]int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+        INSERT INTO stats (author_id, date, clicks)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (author_id, date)
+        DO UPDATE SET clicks = EXCLUDED.clicks`)
+	if err != nil {
+		return fmt.Errorf("prepare stmt: %w", err)
+	}
+	defer stmt.Close()
+
+	for authorID, clicks := range stats {
+		if _, err := stmt.ExecContext(ctx, authorID, date, clicks); err != nil {
+			return fmt.Errorf("save stats author %d: %w", authorID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
 }

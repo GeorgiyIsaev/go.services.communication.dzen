@@ -1,4 +1,3 @@
-// cmd/StatsKeeper/main.go
 package main
 
 import (
@@ -35,16 +34,19 @@ func main() {
 	svc := service.New(repo, cfg.StatsURL)
 
 	// 5. HTTP-обработчики
-	h := handler.New(repo, svc)
+	h := handler.New(repo)
 
 	// 6. HTTP-сервер
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /stats", h.GetStatsHandler)
-	mux.HandleFunc("POST /update", h.UpdateHandler)
 
 	srv := &http.Server{
-		Addr:    ":8084",
-		Handler: mux,
+		Addr:              ":" + cfg.ServerPort,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// 7. Контекст для планировщика
