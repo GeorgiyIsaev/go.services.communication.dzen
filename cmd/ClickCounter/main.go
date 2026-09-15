@@ -8,8 +8,8 @@ import (
 
 	"syscall"
 
-	"go.services.communication.dzen/internal/StatsKeeper/handlers"
-	"go.services.communication.dzen/internal/StatsKeeper/service"
+	"go.services.communication.dzen/internal/ClickCounter/handlers"
+	"go.services.communication.dzen/internal/ClickCounter/service"
 )
 
 func main() {

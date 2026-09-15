@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"go.services.communication.dzen/internal/StatsKeeper/service"
+	"go.services.communication.dzen/internal/ClickCounter/service"
 )
 
 func newTrackerAt(now time.Time) *service.Tracker {

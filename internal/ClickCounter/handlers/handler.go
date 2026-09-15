@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"go.services.communication.dzen/internal/StatsKeeper/service"
+	"go.services.communication.dzen/internal/ClickCounter/service"
 )
 
 // StatsResponse представляет ответ для /stats.
