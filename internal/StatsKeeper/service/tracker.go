@@ -34,7 +34,10 @@ func (t *Tracker) SetNowFunc(fn func() time.Time) {
 
 // AddClick добавляет клик пользователя по автору в текущий день.
 func (t *Tracker) AddClick(authorID, userID int64) {
-	t.AddClickAt(authorID, userID, t.nowFunc())
+	t.mu.RLock()
+	now := t.nowFunc()
+	t.mu.RUnlock()
+	t.AddClickAt(authorID, userID, now)
 }
 
 // AddClickAt добавляет клик на конкретный момент времени.
