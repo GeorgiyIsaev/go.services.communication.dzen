@@ -4,29 +4,29 @@ import (
 	"context"
 	"log"
 	"time"
+
+	"go.services.communication.dzen/internal/ClickStorage/timeutil"
 )
 
-// Run запускает фоновый процесс: выполняет обновление для вчерашнего дня
-// при старте, затем ждёт до полуночи и повторяет.
+// Run запускает фоновый процесс: обновление при старте, затем
+// ежедневно в 00:10 и 01:10 UTC. Второй прогон идемпотентен —
+// условный upsert перезапишет только если данные выросли.
 func Run(ctx context.Context, updateFunc func(ctx context.Context, date time.Time) error) {
-	nextMidnight := func() time.Duration {
-		now := time.Now()
-		midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
-		return midnight.Sub(now)
+	runUpdate := func(label string) {
+		yesterday := timeutil.YesterdayUTC()
+		log.Printf("Scheduler: %s update for date %s", label, yesterday.Format("2006-01-02"))
+		if err := updateFunc(ctx, yesterday); err != nil {
+			log.Printf("Scheduler: %s update failed: %v", label, err)
+		} else {
+			log.Printf("Scheduler: %s update completed", label)
+		}
 	}
 
-	// Первое обновление
-	yesterday := time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)
-	log.Printf("Scheduler: initial update for date %s", yesterday.Format("2006-01-02"))
-	if err := updateFunc(ctx, yesterday); err != nil {
-		log.Printf("Scheduler: initial update failed: %v", err)
-	} else {
-		log.Printf("Scheduler: initial update completed")
-	}
+	// Первое обновление при старте
+	runUpdate("initial")
 
-	// Цикл обновлений каждую полночь
 	for {
-		wait := nextMidnight()
+		wait := untilNextRun()
 		log.Printf("Scheduler: next update in %v", wait)
 
 		select {
@@ -34,13 +34,23 @@ func Run(ctx context.Context, updateFunc func(ctx context.Context, date time.Tim
 			log.Println("Scheduler: stopped")
 			return
 		case <-time.After(wait):
-			yesterday := time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)
-			log.Printf("Scheduler: daily update for date %s", yesterday.Format("2006-01-02"))
-			if err := updateFunc(ctx, yesterday); err != nil {
-				log.Printf("Scheduler: daily update failed: %v", err)
-			} else {
-				log.Printf("Scheduler: daily update completed")
-			}
+			runUpdate("scheduled")
 		}
 	}
+}
+
+// untilNextRun возвращает время до ближайшего момента 00:10 / 01:10 UTC.
+func untilNextRun() time.Duration {
+	now := time.Now().UTC()
+	candidates := []time.Time{
+		time.Date(now.Year(), now.Month(), now.Day(), 0, 10, 0, 0, time.UTC),
+		time.Date(now.Year(), now.Month(), now.Day(), 1, 10, 0, 0, time.UTC),
+	}
+	for _, c := range candidates {
+		if c.After(now) {
+			return c.Sub(now)
+		}
+	}
+	next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 10, 0, 0, time.UTC)
+	return next.Sub(now)
 }
