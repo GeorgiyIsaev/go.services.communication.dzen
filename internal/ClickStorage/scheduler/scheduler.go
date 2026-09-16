@@ -41,7 +41,11 @@ func Run(ctx context.Context, updateFunc func(ctx context.Context, date time.Tim
 
 // untilNextRun возвращает время до ближайшего момента 00:10 / 01:10 UTC.
 func untilNextRun() time.Duration {
-	now := time.Now().UTC()
+	return untilNextRunFrom(time.Now().UTC())
+}
+
+// untilNextRunFrom — чистая функция, тестируемая.
+func untilNextRunFrom(now time.Time) time.Duration {
 	candidates := []time.Time{
 		time.Date(now.Year(), now.Month(), now.Day(), 0, 10, 0, 0, time.UTC),
 		time.Date(now.Year(), now.Month(), now.Day(), 1, 10, 0, 0, time.UTC),
