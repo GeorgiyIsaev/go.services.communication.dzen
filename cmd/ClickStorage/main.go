@@ -55,7 +55,7 @@ func main() {
 	defer stop()
 
 	// 7. Планировщик
-	go scheduler.Run(ctx, svc.UpdateStatsForDate)
+	go scheduler.Run(ctx, svc.UpdateStatsForDate, cfg.SchedulerRetryInterval)
 
 	// 8. HTTP-сервер
 	serverErr := make(chan error, 1)

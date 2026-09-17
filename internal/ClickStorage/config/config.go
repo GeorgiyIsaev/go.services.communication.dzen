@@ -4,20 +4,22 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	DBHost          string
-	DBPort          string
-	DBUser          string
-	DBPassword      string
-	DBName          string
-	StatsURL        string
-	ServerPort      string
-	StatsBatchSize  int
-	StatsMaxRetries int
+	DBHost                 string
+	DBPort                 string
+	DBUser                 string
+	DBPassword             string
+	DBName                 string
+	StatsURL               string
+	ServerPort             string
+	StatsBatchSize         int
+	StatsMaxRetries        int
+	SchedulerRetryInterval time.Duration
 }
 
 func Load() *Config {
@@ -26,15 +28,16 @@ func Load() *Config {
 	}
 
 	return &Config{
-		DBHost:          getEnv("DB_HOST", "localhost"),
-		DBPort:          getEnv("DB_PORT", "5432"),
-		DBUser:          getEnv("DB_USER", "postgres"),
-		DBPassword:      getEnv("DB_PASSWORD", ""),
-		DBName:          getEnv("DB_NAME", "click_analytics"),
-		StatsURL:        getEnv("STATS_SERVICE_URL", "http://external-service/stats"),
-		ServerPort:      getEnv("PORT_CLICK_STORAGE", "8084"), // по умолчанию 8084
-		StatsBatchSize:  getEnvInt("STATS_BATCH_SIZE", 100),
-		StatsMaxRetries: getEnvInt("STATS_MAX_RETRIES", 3),
+		DBHost:                 getEnv("DB_HOST", "localhost"),
+		DBPort:                 getEnv("DB_PORT", "5432"),
+		DBUser:                 getEnv("DB_USER", "postgres"),
+		DBPassword:             getEnv("DB_PASSWORD", ""),
+		DBName:                 getEnv("DB_NAME", "click_analytics"),
+		StatsURL:               getEnv("STATS_SERVICE_URL", "http://external-service/stats"),
+		ServerPort:             getEnv("PORT_CLICK_STORAGE", "8084"), // по умолчанию 8084
+		StatsBatchSize:         getEnvInt("STATS_BATCH_SIZE", 100),
+		StatsMaxRetries:        getEnvInt("STATS_MAX_RETRIES", 3),
+		SchedulerRetryInterval: getEnvDuration("SCHEDULER_RETRY_INTERVAL", 30*time.Minute),
 	}
 }
 
@@ -49,6 +52,15 @@ func getEnvInt(key string, fallback int) int {
 	if value, ok := os.LookupEnv(key); ok {
 		if n, err := strconv.Atoi(value); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if v, ok := os.LookupEnv(key); ok {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
 		}
 	}
 	return fallback
