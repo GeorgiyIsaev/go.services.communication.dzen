@@ -10,6 +10,9 @@ type Author struct {
 type StatsResponse struct {
 	Dates   []string      `json:"dates"`
 	Authors []AuthorStats `json:"authors"`
+	Total   int           `json:"total"`
+	Limit   int           `json:"limit"`
+	Offset  int           `json:"offset"`
 }
 
 type AuthorStats struct {
