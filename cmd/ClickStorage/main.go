@@ -12,7 +12,6 @@ import (
 
 	"go.services.communication.dzen/internal/ClickStorage/config"
 	"go.services.communication.dzen/internal/ClickStorage/db"
-	"go.services.communication.dzen/internal/ClickStorage/handler"
 	"go.services.communication.dzen/internal/ClickStorage/repository"
 	"go.services.communication.dzen/internal/ClickStorage/scheduler"
 	"go.services.communication.dzen/internal/ClickStorage/service"
@@ -35,29 +34,22 @@ func main() {
 	// 4. Сервис обновления статистики
 	svc := service.New(repo, cfg.StatsURL, cfg.StatsBatchSize, cfg.StatsMaxRetries)
 
-	// 5. HTTP-обработчик
-	h := handler.New(repo)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /stats", h.GetStatsHandler)
-
 	srv := &http.Server{
 		Addr:              ":" + cfg.ServerPort,
-		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// 6. Контекст, который отменится по SIGINT/SIGTERM.
+	// 5. Контекст, который отменится по SIGINT/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 7. Планировщик
+	// 6. Планировщик
 	go scheduler.Run(ctx, svc.UpdateStatsForDate, cfg.SchedulerRetryInterval)
 
-	// 8. HTTP-сервер
+	// 7. HTTP-сервер
 	serverErr := make(chan error, 1)
 	go func() {
 		log.Printf("Starting HTTP server on %s", srv.Addr)
@@ -66,7 +58,7 @@ func main() {
 		}
 	}()
 
-	// 9. Ждём сигнал или падение сервера.
+	// 8. Ждём сигнал или падение сервера.
 	select {
 	case <-ctx.Done():
 		log.Println("Shutdown signal received")
@@ -74,7 +66,7 @@ func main() {
 		log.Fatalf("Server failed: %v", err)
 	}
 
-	// 10. Graceful shutdown
+	// 9. Graceful shutdown
 	stop() // восстановить поведение сигналов по умолчанию
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -17,7 +17,6 @@ import (
 type Repository interface {
 	GetAuthors(ctx context.Context) ([]int, error)
 	UpsertStatsBatch(ctx context.Context, date time.Time, stats map[int]int) error
-	GetStatsForDate(ctx context.Context, date time.Time) (map[int]int, error)
 }
 
 type Service struct {
@@ -141,23 +140,19 @@ func (s *Service) doWithRetry(req *http.Request) (*http.Response, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= s.maxRetries; attempt++ {
-		// req нельзя переиспользовать после Do — клонируем.
 		r := req.Clone(req.Context())
 		resp, err := s.httpClient.Do(r)
 
-		// Успех или не-ретраибельный статус — отдаём как есть.
 		if err == nil && !shouldRetryStatus(resp.StatusCode) {
 			return resp, nil
 		}
 
 		if err != nil {
 			lastErr = err
-			// Контекст отменён — дальше смысла нет.
 			if ctxErr := req.Context().Err(); ctxErr != nil {
 				return nil, fmt.Errorf("request canceled: %w", ctxErr)
 			}
 		} else {
-			// 5xx / 429 — дочитываем и закрываем тело, чтобы не текло.
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			lastErr = fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
@@ -167,7 +162,6 @@ func (s *Service) doWithRetry(req *http.Request) (*http.Response, error) {
 			break
 		}
 
-		// full jitter: random(0, min(maxDelay, base * 2^attempt))
 		capDelay := baseDelay << attempt
 		if capDelay > maxDelay || capDelay <= 0 {
 			capDelay = maxDelay
@@ -191,5 +185,5 @@ func shouldRetryStatus(code int) bool {
 	if code >= 500 && code <= 599 {
 		return true
 	}
-	return code == http.StatusTooManyRequests // 429
+	return code == http.StatusTooManyRequests
 }

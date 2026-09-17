@@ -71,22 +71,3 @@ func (r *repo) UpsertStatsBatch(ctx context.Context, date time.Time, stats map[i
 	}
 	return nil
 }
-
-func (r *repo) GetStatsForDate(ctx context.Context, date time.Time) (map[int]int, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT author_id, clicks FROM stats WHERE date = $1`, date)
-	if err != nil {
-		return nil, fmt.Errorf("get stats for date: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[int]int)
-	for rows.Next() {
-		var authorID, clicks int
-		if err := rows.Scan(&authorID, &clicks); err != nil {
-			return nil, fmt.Errorf("scan stats: %w", err)
-		}
-		result[authorID] = clicks
-	}
-	return result, rows.Err()
-}
