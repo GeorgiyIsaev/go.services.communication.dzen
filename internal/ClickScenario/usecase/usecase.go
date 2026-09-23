@@ -69,9 +69,10 @@ func (s *Simulator) runReaderGoroutine(ctx context.Context, sc domain.Scenario, 
 		readWg.Add(1)
 		go func(aID int64) {
 			defer readWg.Done()
-			req := domain.ClickRequest{
-				UserID:   sc.UserID,
-				AuthorID: aID,
+			req := domain.ClickEvent{
+				UserID:    sc.UserID,
+				AuthorID:  aID,
+				Timestamp: time.Now().UTC(),
 			}
 			s.sendWithRetry(ctx, req)
 		}(authorID)
@@ -87,7 +88,7 @@ func (s *Simulator) runReaderGoroutine(ctx context.Context, sc domain.Scenario, 
 	readWg.Wait()
 }
 
-func (s *Simulator) sendWithRetry(ctx context.Context, req domain.ClickRequest) {
+func (s *Simulator) sendWithRetry(ctx context.Context, req domain.ClickEvent) {
 	maxRetries := s.cfg.MaxRetries
 	if maxRetries <= 0 {
 		maxRetries = 1

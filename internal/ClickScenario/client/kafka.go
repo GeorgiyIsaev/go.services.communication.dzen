@@ -39,7 +39,7 @@ func NewKafkaClickSender(brokers []string, topic string) (*KafkaClickSender, err
 	return &KafkaClickSender{writer: w}, nil
 }
 
-func (k *KafkaClickSender) Send(ctx context.Context, req domain.ClickRequest) error {
+func (k *KafkaClickSender) Send(ctx context.Context, req domain.ClickEvent) error {
 	value, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("ошибка маршалинга: %w", err)
@@ -51,7 +51,7 @@ func (k *KafkaClickSender) Send(ctx context.Context, req domain.ClickRequest) er
 	msg := kafka.Message{
 		Key:   key,
 		Value: value,
-		Time:  time.Now(),
+		Time:  time.Now().UTC(),
 	}
 
 	if err := k.writer.WriteMessages(ctx, msg); err != nil {

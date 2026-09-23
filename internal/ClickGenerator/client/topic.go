@@ -11,7 +11,7 @@ import (
 )
 
 // EnsureTopic создаёт топик с заданным числом партиций и replication factor.
-// Если топик уже существует — возвращает nil (не считаем это ошибкой).
+// Если топик уже существует — проверяет, что число партиций совпадает.
 func EnsureTopic(brokers []string, topic string, partitions, replicationFactor int) error {
 	if len(brokers) == 0 {
 		return fmt.Errorf("не заданы kafka_brokers")

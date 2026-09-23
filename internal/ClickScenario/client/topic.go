@@ -11,7 +11,7 @@ import (
 )
 
 // EnsureTopic создаёт топик с заданным числом партиций и replication factor.
-// Если топик уже существует — возвращает nil (не считаем это ошибкой).
+// Если топик уже существует — проверяет, что число партиций совпадает.
 func EnsureTopic(brokers []string, topic string, partitions, replicationFactor int) error {
 	if len(brokers) == 0 {
 		return fmt.Errorf("не заданы kafka_brokers")
@@ -49,6 +49,14 @@ func EnsureTopic(brokers []string, topic string, partitions, replicationFactor i
 	}
 	defer controllerConn.Close()
 
+	// 1. Топик уже есть? Тогда только сверяем партиции.
+	if err := checkExistingTopic(controllerConn, topic, partitions); err == nil {
+		return nil
+	} else if !errors.Is(err, errTopicNotFound) {
+		return err
+	}
+
+	// 2. Топика нет — создаём.
 	topicConfigs := []kafka.TopicConfig{
 		{
 			Topic:             topic,
@@ -58,10 +66,36 @@ func EnsureTopic(brokers []string, topic string, partitions, replicationFactor i
 	}
 
 	if err := controllerConn.CreateTopics(topicConfigs...); err != nil {
-		if isTopicAlreadyExists(err) {
-			return nil
+		if !isTopicAlreadyExists(err) {
+			return fmt.Errorf("ошибка создания топика %q: %w", topic, err)
 		}
-		return fmt.Errorf("ошибка создания топика %q: %w", topic, err)
+		// Гонка: кто-то создал топик между нашими чтением и созданием.
+		// Сверяем партиции ещё раз, чтобы не пропустить конфликт конфигураций.
+		if err := checkExistingTopic(controllerConn, topic, partitions); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// errTopicNotFound — внутренний маркер «топик ещё не создан».
+var errTopicNotFound = errors.New("топик не найден")
+
+// checkExistingTopic читает метаданные топика и сверяет число партиций.
+// Возвращает errTopicNotFound, если топика нет.
+func checkExistingTopic(conn *kafka.Conn, topic string, want int) error {
+	parts, err := conn.ReadPartitions(topic)
+	if err != nil {
+		// kafka-go возвращает ошибку, если топик не существует.
+		return errTopicNotFound
+	}
+	if len(parts) == 0 {
+		return errTopicNotFound
+	}
+	if len(parts) != want {
+		return fmt.Errorf("топик %q уже существует с %d партициями, ожидалось %d",
+			topic, len(parts), want)
 	}
 	return nil
 }

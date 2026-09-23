@@ -3,11 +3,13 @@ package domain
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
-type ClickRequest struct {
-	UserID   int64 `json:"user_id"`
-	AuthorID int64 `json:"author_id"`
+type ClickEvent struct {
+	UserID    int64     `json:"user_id"`
+	AuthorID  int64     `json:"author_id"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 type Config struct {
@@ -22,7 +24,7 @@ type Config struct {
 
 // ClickSender контракт на отправку клика (порт)
 type ClickSender interface {
-	Send(ctx context.Context, req ClickRequest) error
+	Send(ctx context.Context, req ClickEvent) error
 }
 
 // Scenario описывает сценарий чтений одного пользователя.
