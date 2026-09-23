@@ -27,6 +27,9 @@ func main() {
 	if err := json.NewDecoder(cfgFile).Decode(&cfg); err != nil {
 		log.Fatalf("Не удалось распарсить config.json: %v", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Некорректный config.json: %v", err)
+	}
 
 	// Гарантируем, что топик существует с нужным числом партиций
 	if err := client.EnsureTopic(
@@ -50,7 +53,10 @@ func main() {
 		}
 	}()
 
-	sim := usecase.NewSimulator(cfg, kafkaSender)
+	sim, err := usecase.NewSimulator(cfg, kafkaSender)
+	if err != nil {
+		log.Fatalf("Не удалось создать симулятор: %v", err)
+	}
 	sim.Run(ctx)
 
 	log.Println("Завершение работы.")

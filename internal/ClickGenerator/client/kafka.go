@@ -39,19 +39,19 @@ func NewKafkaClickSender(brokers []string, topic string) (*KafkaClickSender, err
 	return &KafkaClickSender{writer: w}, nil
 }
 
-func (k *KafkaClickSender) Send(ctx context.Context, req domain.ClickRequest) error {
+func (k *KafkaClickSender) Send(ctx context.Context, req domain.ClickEvent) error {
 	value, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("ошибка маршалинга: %w", err)
 	}
 
-	// Ключ = UserID. Это позволяет Kafka раскладывать клики одного пользователя в одну партицию.
+	// Ключ = AuthorID. Это позволяет Kafka раскладывать клики одного автора в одну партицию.
 	key := []byte(strconv.FormatInt(req.AuthorID, 10))
 
 	msg := kafka.Message{
 		Key:   key,
 		Value: value,
-		Time:  time.Now(),
+		Time:  time.Now().UTC(),
 	}
 
 	if err := k.writer.WriteMessages(ctx, msg); err != nil {

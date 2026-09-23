@@ -16,7 +16,7 @@ func main() {
 	brokers := []string{"localhost:9092", "localhost:9093", "localhost:9094"}
 	topic := "clicks"
 	groupID := "stats-keeper"
-	port := ":8081"
+	port := ":8080"
 
 	tracker := service.NewTracker()
 	consumer := service.NewConsumer(brokers, topic, groupID, tracker)

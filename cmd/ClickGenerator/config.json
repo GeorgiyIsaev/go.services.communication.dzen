@@ -13,6 +13,6 @@
   "reader_id_end": 1000,
   "min_reads": 10,
   "max_reads": 100,
-  "delay_between_reads_sec": 1,
+  "delay_between_reads_sec": 0,
   "max_retries": 5
 }

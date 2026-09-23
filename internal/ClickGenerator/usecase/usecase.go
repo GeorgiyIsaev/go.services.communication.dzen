@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -16,21 +17,26 @@ type Simulator struct {
 	sender           domain.ClickSender // Зависимость от интерфейса, а не от конкретной реализации
 	completedReaders int64              // Атомарный счетчик завершенных горутин пользователей
 	totalReaders     int64
-	rng              *rand.Rand
 }
 
-func NewSimulator(cfg domain.Config, sender domain.ClickSender) *Simulator {
+func NewSimulator(cfg domain.Config, sender domain.ClickSender) (*Simulator, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("некорректный конфиг симулятора: %w", err)
+	}
+	if sender == nil {
+		return nil, fmt.Errorf("sender не задан")
+	}
+
 	totalReaders := cfg.ReaderIDEnd - cfg.ReaderIDStart + 1
 	return &Simulator{
 		cfg:          cfg,
 		sender:       sender,
 		totalReaders: totalReaders,
-		rng:          rand.New(rand.NewSource(time.Now().UnixNano())),
-	}
+	}, nil
 }
 
 func (s *Simulator) Run(ctx context.Context) {
-	fmt.Printf("Запуск симуляции. Всего пользователей: %d\n", s.totalReaders)
+	log.Printf("Запуск симуляции. Всего пользователей: %d\n", s.totalReaders)
 
 	var mainWg sync.WaitGroup
 
@@ -40,7 +46,7 @@ func (s *Simulator) Run(ctx context.Context) {
 	}
 
 	mainWg.Wait()
-	fmt.Println("Все горутины успешно завершены. Программа завершает работу.")
+	log.Println("Все горутины успешно завершены. Программа завершает работу.")
 }
 
 func (s *Simulator) runReaderGoroutine(ctx context.Context, readerID int64, mainWg *sync.WaitGroup) {
@@ -48,7 +54,7 @@ func (s *Simulator) runReaderGoroutine(ctx context.Context, readerID int64, main
 
 	defer func() {
 		completed := atomic.AddInt64(&s.completedReaders, 1)
-		fmt.Printf("Горутина Завершена %d из %d (User ID: %d)\n", completed, s.totalReaders, readerID)
+		log.Printf("Горутина Завершена %d из %d (User ID: %d)\n", completed, s.totalReaders, readerID)
 	}()
 
 	numReads := rand.Intn(s.cfg.MaxReads-s.cfg.MinReads+1) + s.cfg.MinReads
@@ -60,7 +66,10 @@ func (s *Simulator) runReaderGoroutine(ctx context.Context, readerID int64, main
 		readWg.Add(1)
 		go func(aID int64) {
 			defer readWg.Done()
-			req := domain.ClickRequest{UserID: readerID, AuthorID: aID}
+			req := domain.ClickEvent{
+				UserID:    readerID,
+				AuthorID:  aID,
+				Timestamp: time.Now().UTC()}
 			s.sendWithRetry(ctx, req)
 		}(authorID)
 
@@ -78,7 +87,7 @@ func (s *Simulator) runReaderGoroutine(ctx context.Context, readerID int64, main
 	readWg.Wait()
 }
 
-func (s *Simulator) sendWithRetry(ctx context.Context, req domain.ClickRequest) {
+func (s *Simulator) sendWithRetry(ctx context.Context, req domain.ClickEvent) {
 	maxRetries := s.cfg.MaxRetries
 	if maxRetries <= 0 {
 		maxRetries = 1
@@ -87,7 +96,7 @@ func (s *Simulator) sendWithRetry(ctx context.Context, req domain.ClickRequest) 
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
-			fmt.Printf("[INFO] Отправка прервана (User: %d, Author: %d): %v\n", req.UserID, req.AuthorID, err)
+			log.Printf("[INFO] Отправка прервана (User: %d, Author: %d): %v\n", req.UserID, req.AuthorID, err)
 			return
 		}
 
@@ -99,7 +108,7 @@ func (s *Simulator) sendWithRetry(ctx context.Context, req domain.ClickRequest) 
 			return // Успешно отправлено
 		}
 
-		fmt.Printf("[WARN] Не удалось отправить клик (User: %d, Author: %d). Попытка %d/%d. Ошибка: %v\n",
+		log.Printf("[WARN] Не удалось отправить клик (User: %d, Author: %d). Попытка %d/%d. Ошибка: %v\n",
 			req.UserID, req.AuthorID, attempt, maxRetries, err)
 
 		if attempt < maxRetries {
@@ -107,13 +116,13 @@ func (s *Simulator) sendWithRetry(ctx context.Context, req domain.ClickRequest) 
 			select {
 			case <-time.After(backoff + jitter):
 			case <-ctx.Done():
-				fmt.Printf("[INFO] Ретрай прерван (User: %d, Author: %d): %v\n", req.UserID, req.AuthorID, ctx.Err())
+				log.Printf("[INFO] Ретрай прерван (User: %d, Author: %d): %v\n", req.UserID, req.AuthorID, ctx.Err())
 				return
 			}
 			backoff *= 2 // Экспоненциальное увеличение задержки (Exponential Backoff)
 		}
 	}
 
-	fmt.Printf("[ERROR] Клик окончательно не доставлен после %d попыток (User: %d, Author: %d)\n",
+	log.Printf("[ERROR] Клик окончательно не доставлен после %d попыток (User: %d, Author: %d)\n",
 		maxRetries, req.UserID, req.AuthorID)
 }
