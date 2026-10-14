@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"go.services.communication.dzen/internal/ClickStorage/config"
-	"go.services.communication.dzen/internal/ClickStorage/db"
-	"go.services.communication.dzen/internal/ClickStorage/repository"
-	"go.services.communication.dzen/internal/ClickStorage/scheduler"
-	"go.services.communication.dzen/internal/ClickStorage/service"
+	"go.services.communication.dzen/app/ClickStorage/internal/repository"
+	"go.services.communication.dzen/app/ClickStorage/internal/service"
+	"go.services.communication.dzen/app/ClickStorage/pkg/config"
+	"go.services.communication.dzen/app/ClickStorage/pkg/db"
+	"go.services.communication.dzen/app/ClickStorage/pkg/scheduler"
 )
 
 func main() {

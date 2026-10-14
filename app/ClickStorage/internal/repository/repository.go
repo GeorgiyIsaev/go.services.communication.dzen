@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"go.services.communication.dzen/internal/ClickStorage/service"
+	"go.services.communication.dzen/app/ClickStorage/internal/service"
 )
 
 type repo struct {

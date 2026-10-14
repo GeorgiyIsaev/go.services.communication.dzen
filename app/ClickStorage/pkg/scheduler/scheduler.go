@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"go.services.communication.dzen/internal/ClickStorage/timeutil"
+	"go.services.communication.dzen/app/ClickStorage/pkg/timeutil"
 )
 
 // Run запускает фоновый процесс: обновление при старте, затем

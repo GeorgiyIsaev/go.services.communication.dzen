@@ -9,7 +9,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/lib/pq"
-	"go.services.communication.dzen/internal/ClickStorage/config"
+	"go.services.communication.dzen/app/ClickStorage/pkg/config"
 )
 
 func Connect(cfg *config.Config) (*sql.DB, error) {
@@ -26,7 +26,7 @@ func Connect(cfg *config.Config) (*sql.DB, error) {
 	}
 
 	// Применяем миграции
-	if err := runMigrations(db, "file://internal/ClickStorage/migrations"); err != nil {
+	if err := runMigrations(db, "file://app/ClickStorage/migrations"); err != nil {
 		return nil, fmt.Errorf("migrations: %w", err)
 	}
 
