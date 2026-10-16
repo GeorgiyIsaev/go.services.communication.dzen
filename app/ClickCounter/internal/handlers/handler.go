@@ -1,66 +1,75 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
-
-	"go.services.communication.dzen/internal/ClickCounter/service"
+	"time"
 )
 
-// StatsResponse представляет ответ для /stats.
-type StatsResponse struct {
-	Stats []AuthorStat `json:"stats"`
+type Sender interface {
+	SendNow(ctx context.Context, date time.Time) error
 }
 
-// AuthorStat описывает статистику по одному автору.
-type AuthorStat struct {
-	AuthorID int64 `json:"author_id"`
-	Count    int   `json:"count"`
+type StatsHandler struct {
+	sender Sender
+	logger *slog.Logger
 }
 
-// statsHandler обрабатывает GET /stats.
-// Параметр author_ids передаётся как query-строка, например: ?author_ids=1,2,3
-func StatsHandler(tracker *service.Tracker) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+func NewStatsHandler(sender Sender, logger *slog.Logger) *StatsHandler {
+	return &StatsHandler{sender: sender, logger: logger}
+}
+
+func (h *StatsHandler) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /flush", h.Flush)
+	mux.HandleFunc("GET /healthz", h.Health)
+}
+
+// Flush — ручной триггер отправки. По умолчанию отправляет данные за вчера.
+// Опциональный ?date=2006-01-02 позволяет выбрать конкретный день (для отладки).
+//
+//	curl -X POST http://localhost:8080/flush
+//	curl -X POST 'http://localhost:8080/flush?date=2024-01-15'
+func (h *StatsHandler) Flush(w http.ResponseWriter, r *http.Request) {
+	date := time.Now().UTC().AddDate(0, 0, -1)
+
+	if v := r.URL.Query().Get("date"); v != "" {
+		parsed, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid date format, expected 2006-01-02")
 			return
 		}
-
-		idsParam := r.URL.Query().Get("author_ids")
-		if idsParam == "" {
-			http.Error(w, "Missing author_ids parameter", http.StatusBadRequest)
-			return
-		}
-
-		parts := strings.Split(idsParam, ",")
-		authorIDs := make([]int64, 0, len(parts))
-		for _, part := range parts {
-			id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
-			if err != nil {
-				http.Error(w, "Invalid author_id", http.StatusBadRequest)
-				return
-			}
-			authorIDs = append(authorIDs, id)
-		}
-
-		stats := tracker.GetYesterdayStats(authorIDs)
-
-		resp := StatsResponse{
-			Stats: make([]AuthorStat, 0, len(authorIDs)),
-		}
-		for _, id := range authorIDs {
-			resp.Stats = append(resp.Stats, AuthorStat{
-				AuthorID: id,
-				Count:    stats[id],
-			})
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-		}
+		date = parsed
 	}
+
+	h.logger.InfoContext(r.Context(), "manual flush requested",
+		"date", date.Format("2006-01-02"))
+
+	// Асинхронно, чтобы HTTP-ответ не висел до конца всех ретраев.
+	go func() {
+		if err := h.sender.SendNow(context.Background(), date); err != nil {
+			h.logger.Error("manual flush failed", "err", err)
+		}
+	}()
+
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"status": "accepted",
+		"date":   date.Format("2006-01-02"),
+	})
+}
+
+func (h *StatsHandler) Health(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
 }

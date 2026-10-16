@@ -3,16 +3,19 @@ package service
 import (
 	"sync"
 	"time"
+
+	"go.services.communication.dzen/app/ClickCounter/internal/domain"
 )
 
-// Tracker хранит клики по дням и обеспечивает потокобезопасный доступ.
+// Tracker хранит клики по дням (только сегодня и вчера) и обеспечивает
+// потокобезопасный доступ. Считаем УНИКАЛЬНЫХ пользователей на пару
+// (день, автор). Один user_id, кликнувший 5 раз — это 1.
 type Tracker struct {
 	mu      sync.RWMutex
-	days    map[string]map[int64]map[int64]struct{} // day -> author -> user -> struct{}
+	days    map[string]map[int64]map[int64]struct{}
 	nowFunc func() time.Time
 }
 
-// NewTracker создаёт новый экземпляр Tracker.
 func NewTracker() *Tracker {
 	return &Tracker{
 		days:    make(map[string]map[int64]map[int64]struct{}),
@@ -20,27 +23,24 @@ func NewTracker() *Tracker {
 	}
 }
 
-// dayKey возвращает строку дня для переданного времени в UTC.
-func dayKey(t time.Time) string {
-	return t.UTC().Format("2006-01-02")
-}
-
-// SetNowFunc устанавливает функцию получения текущего времени (для тестов).
+// SetNowFunc — для тестов.
 func (t *Tracker) SetNowFunc(fn func() time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.nowFunc = fn
 }
 
-// AddClick добавляет клик пользователя по автору в текущий день.
+func dayKey(t time.Time) string {
+	return t.UTC().Format("2006-01-02")
+}
+
+// AddClick — добавить клик «сейчас».
 func (t *Tracker) AddClick(authorID, userID int64) {
-	t.mu.RLock()
-	now := t.nowFunc()
-	t.mu.RUnlock()
-	t.AddClickAt(authorID, userID, now)
+	t.AddClickAt(authorID, userID, time.Now())
 }
 
 // AddClickAt добавляет клик на конкретный момент времени.
+// Игнорирует сообщения старше «вчера».
 func (t *Tracker) AddClickAt(authorID, userID int64, at time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -70,7 +70,7 @@ func (t *Tracker) AddClickAt(authorID, userID int64, at time.Time) {
 	}
 	users[userID] = struct{}{}
 
-	// Чистим всё, что старше вчера
+	// Чистим всё старше вчера.
 	for d := range t.days {
 		if d != today && d != yesterday {
 			delete(t.days, d)
@@ -78,22 +78,19 @@ func (t *Tracker) AddClickAt(authorID, userID int64, at time.Time) {
 	}
 }
 
-// GetYesterdayStats возвращает количество уникальных пользователей для каждого запрошенного автора
-// за предыдущий календарный день (вчера). Для авторов без данных возвращается 0.
-func (t *Tracker) GetYesterdayStats(authorIDs []int64) map[int64]int {
+// GetByDate возвращает агрегированные данные за указанный день (UTC).
+// Авторы без кликов не возвращаются.
+func (t *Tracker) GetByDate(date time.Time) []domain.AuthorStat {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	yesterday := dayKey(t.nowFunc().AddDate(0, 0, -1))
-	dayData := t.days[yesterday]
-
-	result := make(map[int64]int, len(authorIDs))
-	for _, id := range authorIDs {
-		if users, ok := dayData[id]; ok {
-			result[id] = len(users)
-		} else {
-			result[id] = 0
-		}
+	dayData := t.days[dayKey(date)]
+	result := make([]domain.AuthorStat, 0, len(dayData))
+	for authorID, users := range dayData {
+		result = append(result, domain.AuthorStat{
+			AuthorID: authorID,
+			Count:    int64(len(users)),
+		})
 	}
 	return result
 }

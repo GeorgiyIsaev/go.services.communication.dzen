@@ -3,14 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/segmentio/kafka-go"
+
+	"go.services.communication.dzen/app/ClickCounter/pkg/config"
 )
 
 // ClickMessage — формат сообщения в топике clicks.
-// Должен совпадать с тем, что пишет продюсер.
 type ClickMessage struct {
 	UserID   int64 `json:"user_id"`
 	AuthorID int64 `json:"author_id"`
@@ -20,24 +21,22 @@ type ClickMessage struct {
 type Consumer struct {
 	reader  *kafka.Reader
 	tracker *Tracker
+	logger  *slog.Logger
 }
 
-// NewConsumer создаёт Kafka-консьюмер.
-func NewConsumer(brokers []string, topic, groupID string, tracker *Tracker) *Consumer {
+func NewConsumer(cfg config.Kafka, tracker *Tracker, logger *slog.Logger) *Consumer {
 	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        brokers,
-		Topic:          topic,
-		GroupID:        groupID,
-		MinBytes:       1,
-		MaxBytes:       10e6, // 10 MB
-		MaxWait:        500 * time.Millisecond,
-		CommitInterval: 0, // отключить авто-коммит офсетов
-		StartOffset:    kafka.FirstOffset,
+		Brokers: cfg.Brokers,
+		Topic:   cfg.Topic,
+		// GroupID НЕ выставляем — при каждом старте читаем сначала
+		StartOffset: kafka.FirstOffset,
+		MinBytes:    1,
+		MaxBytes:    10e6,
+		MaxWait:     500 * time.Millisecond,
 	})
-	return &Consumer{reader: reader, tracker: tracker}
+	return &Consumer{reader: reader, tracker: tracker, logger: logger}
 }
 
-// Run блокирующе читает сообщения до отмены ctx.
 func (c *Consumer) Run(ctx context.Context) error {
 	for {
 		msg, err := c.reader.ReadMessage(ctx)
@@ -45,36 +44,32 @@ func (c *Consumer) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			log.Printf("kafka read error: %v", err)
+			c.logger.Error("kafka read error", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
 		var m ClickMessage
 		if err := json.Unmarshal(msg.Value, &m); err != nil {
-			log.Printf("invalid message on topic=%s partition=%d offset=%d: %v",
-				msg.Topic, msg.Partition, msg.Offset, err)
+			c.logger.Warn("invalid message",
+				"topic", msg.Topic, "partition", msg.Partition, "offset", msg.Offset, "err", err)
+			continue
+		}
+		if m.UserID <= 0 || m.AuthorID <= 0 {
+			c.logger.Warn("invalid ids",
+				"topic", msg.Topic, "partition", msg.Partition, "offset", msg.Offset,
+				"user_id", m.UserID, "author_id", m.AuthorID)
 			continue
 		}
 
-		if m.UserID <= 0 || m.AuthorID <= 0 {
-			log.Printf("invalid ids on topic=%s partition=%d offset=%d: user_id=%d author_id=%d",
-				msg.Topic, msg.Partition, msg.Offset, m.UserID, m.AuthorID)
-			continue
-		}
-		// Используем время из сообщения, а не time.Now():
 		at := msg.Time
 		if at.IsZero() {
 			at = time.Now()
 		}
 		c.tracker.AddClickAt(m.AuthorID, m.UserID, at)
-		if err := c.reader.CommitMessages(ctx, msg); err != nil {
-			log.Printf("commit error: %v", err)
-		}
 	}
 }
 
-// Close закрывает reader.
 func (c *Consumer) Close() error {
 	return c.reader.Close()
 }
