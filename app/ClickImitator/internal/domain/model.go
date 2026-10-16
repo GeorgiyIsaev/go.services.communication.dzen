@@ -6,23 +6,16 @@ import (
 	"time"
 )
 
+// ClickEvent — то, что уходит в Kafka. Формат совпадает с тем,
+// что ожидает ClickCounter (ClickMessage).
 type ClickEvent struct {
 	UserID    int64     `json:"user_id"`
 	AuthorID  int64     `json:"author_id"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
-type Config struct {
-	KafkaBrokers           []string `json:"kafka_brokers"`
-	KafkaTopic             string   `json:"kafka_topic"`
-	KafkaPartitions        int      `json:"kafka_partitions"`
-	KafkaReplicationFactor int      `json:"kafka_replication_factor"`
-	ScenarioDir            string   `json:"scenario_dir"`
-	DelayBetweenReadsSec   int      `json:"delay_between_reads_sec"`
-	MaxRetries             int      `json:"max_retries"`
-}
-
-// ClickSender контракт на отправку клика (порт)
+// ClickSender — контракт на отправку клика (порт).
+// Реализация — в internal/client.
 type ClickSender interface {
 	Send(ctx context.Context, req ClickEvent) error
 }
@@ -33,7 +26,6 @@ type Scenario struct {
 	Authors []int64
 }
 
-// Validate проверяет, что сценарий заполнен корректно.
 func (s Scenario) Validate() error {
 	if s.UserID == 0 {
 		return fmt.Errorf("не задан user_id")
