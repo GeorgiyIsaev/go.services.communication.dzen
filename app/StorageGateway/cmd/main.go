@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"go.services.communication.dzen/app/StorageGateway/internal/handlers"
-	"go.services.communication.dzen/app/StorageGateway/internal/middleware"
 	"go.services.communication.dzen/app/StorageGateway/internal/repository"
 	"go.services.communication.dzen/app/StorageGateway/internal/service"
 	"go.services.communication.dzen/app/StorageGateway/pkg/config"
 	"go.services.communication.dzen/app/StorageGateway/pkg/db"
 	"go.services.communication.dzen/app/StorageGateway/pkg/logger"
+	"go.services.communication.dzen/app/StorageGateway/pkg/middleware"
 )
 
 func main() {

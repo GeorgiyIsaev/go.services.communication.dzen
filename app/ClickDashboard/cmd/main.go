@@ -13,10 +13,10 @@ import (
 
 	"go.services.communication.dzen/app/ClickDashboard/internal/client"
 	"go.services.communication.dzen/app/ClickDashboard/internal/handlers"
-	"go.services.communication.dzen/app/ClickDashboard/internal/middleware"
 	"go.services.communication.dzen/app/ClickDashboard/internal/service"
 	"go.services.communication.dzen/app/ClickDashboard/pkg/config"
 	"go.services.communication.dzen/app/ClickDashboard/pkg/logger"
+	"go.services.communication.dzen/app/ClickDashboard/pkg/middleware"
 )
 
 // indexHTML встраивается в бинарь.
