@@ -9,6 +9,9 @@ import (
 	"go.services.communication.dzen/app/ClickImitator/internal/domain"
 )
 
+// initialSendBackoff — стартовая пауза перед повтором. (для тестов)
+var initialSendBackoff = 500 * time.Millisecond
+
 // Strategy — источник «что и кому отправить». Random и Scenario реализуют его.
 type Strategy interface {
 	// Name — для логов.
@@ -63,7 +66,7 @@ func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.Cl
 	if maxRetries <= 0 {
 		maxRetries = 1
 	}
-	backoff := 500 * time.Millisecond
+	backoff := initialSendBackoff
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {

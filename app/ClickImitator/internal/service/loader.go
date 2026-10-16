@@ -122,6 +122,9 @@ func buildScenarios(lines []line) ([]domain.Scenario, error) {
 			if err != nil {
 				return nil, fmt.Errorf("строка %d: неверный user_id %q: %w", ln.num, val, err)
 			}
+			if id <= 0 {
+				return nil, fmt.Errorf("строка %d: user_id должен быть положительным, получено %d", ln.num, id)
+			}
 			current = &domain.Scenario{UserID: id}
 		case strings.HasPrefix(ln.text, "authors"):
 			if current == nil {
@@ -137,6 +140,9 @@ func buildScenarios(lines []line) ([]domain.Scenario, error) {
 				id, err := strconv.ParseInt(p, 10, 64)
 				if err != nil {
 					return nil, fmt.Errorf("строка %d: неверный author_id %q: %w", ln.num, p, err)
+				}
+				if id <= 0 {
+					return nil, fmt.Errorf("строка %d: author_id должен быть положительным, получено %d", ln.num, id)
 				}
 				current.Authors = append(current.Authors, id)
 			}
