@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"go.services.communication.dzen/app/ClickImitator/internal/domain"
 	"go.services.communication.dzen/app/ClickImitator/pkg/config"
 )
+
+var testSenderCfg = config.Sender{MaxRetries: 1, SendTimeout: time.Second}
 
 func TestScenarioStrategy_Name(t *testing.T) {
 	svc := NewScenarioStrategy(config.Scenario{}, nil, discardLogger())
@@ -19,11 +22,8 @@ func TestScenarioStrategy_Name(t *testing.T) {
 
 func TestScenarioStrategy_TotalUsers(t *testing.T) {
 	svc := NewScenarioStrategy(config.Scenario{}, []domain.Scenario{
-		{UserID: 1},
-		{UserID: 2},
-		{UserID: 3},
+		{UserID: 1}, {UserID: 2}, {UserID: 3},
 	}, discardLogger())
-
 	if got := svc.TotalUsers(); got != 3 {
 		t.Fatalf("TotalUsers() = %d, want 3", got)
 	}
@@ -36,7 +36,6 @@ func TestScenarioStrategy_TotalUsers_Empty(t *testing.T) {
 	}
 }
 
-// DelayBetweenReadsSec = 0 делает Run быстрым и детерминированным по числу вызовов.
 func TestScenarioStrategy_Run(t *testing.T) {
 	scenarios := []domain.Scenario{
 		{UserID: 1, Authors: []int64{10, 11}},
@@ -45,10 +44,9 @@ func TestScenarioStrategy_Run(t *testing.T) {
 	svc := NewScenarioStrategy(config.Scenario{DelayBetweenReadsSec: 0}, scenarios, discardLogger())
 	sender := &mockSender{}
 
-	if err := svc.Run(context.Background(), sender, 1); err != nil {
+	if err := svc.Run(context.Background(), sender, testSenderCfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
 	if sender.count() != 3 {
 		t.Fatalf("calls = %d, want 3", sender.count())
 	}
@@ -72,7 +70,7 @@ func TestScenarioStrategy_Run_Empty(t *testing.T) {
 	svc := NewScenarioStrategy(config.Scenario{}, nil, discardLogger())
 	sender := &mockSender{}
 
-	if err := svc.Run(context.Background(), sender, 1); err != nil {
+	if err := svc.Run(context.Background(), sender, testSenderCfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if sender.count() != 0 {
@@ -80,8 +78,7 @@ func TestScenarioStrategy_Run_Empty(t *testing.T) {
 	}
 }
 
-// Отменённый контекст: sendWithRetry проверяет ctx.Err() в начале и
-// не должен отправить ни одного клика.
+// Отменённый контекст — graceful abort, не ошибка.
 func TestScenarioStrategy_Run_ContextCancelled(t *testing.T) {
 	scenarios := []domain.Scenario{
 		{UserID: 1, Authors: []int64{10, 11, 12}},
@@ -92,14 +89,15 @@ func TestScenarioStrategy_Run_ContextCancelled(t *testing.T) {
 	cancel()
 
 	sender := &mockSender{}
-	_ = svc.Run(ctx, sender, 1)
-
+	if err := svc.Run(ctx, sender, testSenderCfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if sender.count() != 0 {
 		t.Fatalf("calls = %d, want 0 (ctx cancelled)", sender.count())
 	}
 }
 
-// Ошибки отправки не возвращаются наружу — Run не должен падать.
+// Исчерпанные retry теперь агрегируются и возвращаются как ошибка.
 func TestScenarioStrategy_Run_SendError(t *testing.T) {
 	scenarios := []domain.Scenario{
 		{UserID: 1, Authors: []int64{10}},
@@ -107,8 +105,9 @@ func TestScenarioStrategy_Run_SendError(t *testing.T) {
 	svc := NewScenarioStrategy(config.Scenario{DelayBetweenReadsSec: 0}, scenarios, discardLogger())
 	sender := &mockSender{errs: []error{errors.New("send failed")}}
 
-	if err := svc.Run(context.Background(), sender, 1); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := svc.Run(context.Background(), sender, testSenderCfg)
+	if err == nil {
+		t.Fatal("expected error from Run when send fails, got nil")
 	}
 	if sender.count() != 1 {
 		t.Fatalf("calls = %d, want 1", sender.count())

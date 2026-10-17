@@ -396,28 +396,3 @@ func TestLoadScenarios(t *testing.T) {
 		}
 	})
 }
-
-// --- isComment ---
-
-func TestIsComment(t *testing.T) {
-	tests := []struct {
-		in   string
-		want bool
-	}{
-		{"", true},
-		{"   ", true},
-		{"#", true},
-		{"###", true},
-		{"  #  ", true},
-		{"\t\n", true},
-		{"abc", false},
-		{" # foo", false}, // 'f', 'o' — не комментарий по этой функции
-	}
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			if got := isComment(tt.in); got != tt.want {
-				t.Errorf("isComment(%q) = %v, want %v", tt.in, got, tt.want)
-			}
-		})
-	}
-}

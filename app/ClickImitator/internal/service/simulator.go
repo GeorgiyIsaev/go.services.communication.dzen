@@ -42,13 +42,17 @@ func (s *Simulator) Run(ctx context.Context) error {
 		"users", s.strategy.TotalUsers())
 
 	err := s.strategy.Run(ctx, s.sender, s.cfg)
-	if err != nil {
-		s.logger.Error("simulation stopped with error", "err", err)
-		return err
-	}
+
+	// Отмена контекста — это graceful shutdown, а не ошибка.
+	// Проверяем раньше err != nil: если сигнал пришёл, exit code должен быть 0,
+	// даже если стратегия успела вернуть агрегированную ошибку.
 	if ctx.Err() != nil {
 		s.logger.Info("simulation interrupted")
 		return nil
+	}
+	if err != nil {
+		s.logger.Error("simulation stopped with error", "err", err)
+		return err
 	}
 	s.logger.Info("simulation completed")
 	return nil
@@ -67,8 +71,8 @@ func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.Cl
 	backoff := initialSendBackoff
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return err
+		if ctx.Err() != nil {
+			return nil // graceful abort до попытки
 		}
 
 		sendCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -78,6 +82,10 @@ func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.Cl
 		if err == nil {
 			return nil
 		}
+		if ctx.Err() != nil {
+			return nil // graceful abort во время попытки
+		}
+
 		lastErr = err
 		logger.Warn("send attempt failed",
 			"user_id", req.UserID, "author_id", req.AuthorID,
@@ -92,7 +100,7 @@ func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.Cl
 			select {
 			case <-time.After(backoff + jitter):
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil // graceful abort в паузе
 			}
 			backoff *= 2
 		}

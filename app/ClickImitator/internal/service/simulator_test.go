@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.services.communication.dzen/app/ClickImitator/internal/domain"
+	"go.services.communication.dzen/app/ClickImitator/pkg/config"
 )
 
 // --- test doubles ---
@@ -52,18 +53,18 @@ func (m *mockSender) snapshot() []domain.ClickEvent {
 type mockStrategy struct {
 	name          string
 	users         int64
-	runFn         func(ctx context.Context, sender domain.ClickSender, maxRetries int) error
+	runFn         func(ctx context.Context, sender domain.ClickSender, cfg config.Sender) error
 	called        bool
 	gotMaxRetries int
 }
 
 func (m *mockStrategy) Name() string      { return m.name }
 func (m *mockStrategy) TotalUsers() int64 { return m.users }
-func (m *mockStrategy) Run(ctx context.Context, sender domain.ClickSender, maxRetries int) error {
+func (m *mockStrategy) Run(ctx context.Context, sender domain.ClickSender, cfg config.Sender) error {
 	m.called = true
-	m.gotMaxRetries = maxRetries
+	m.gotMaxRetries = cfg.MaxRetries
 	if m.runFn != nil {
-		return m.runFn(ctx, sender, maxRetries)
+		return m.runFn(ctx, sender, cfg)
 	}
 	return nil
 }
@@ -81,14 +82,20 @@ func withFastBackoff(t *testing.T) {
 	t.Cleanup(func() { initialSendBackoff = old })
 }
 
+func retryCfg(n int) config.Sender {
+	return config.Sender{MaxRetries: n, SendTimeout: time.Second}
+}
+
 // --- sendWithRetry ---
 
 func TestSendWithRetry_SuccessFirstAttempt(t *testing.T) {
 	sender := &mockSender{}
 	req := domain.ClickEvent{UserID: 1, AuthorID: 2}
 
-	sendWithRetry(context.Background(), sender, req, 3, discardLogger())
-
+	err := sendWithRetry(context.Background(), sender, req, retryCfg(1), discardLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if sender.count() != 1 {
 		t.Fatalf("calls = %d, want 1", sender.count())
 	}
@@ -99,9 +106,13 @@ func TestSendWithRetry_RetriesThenSucceeds(t *testing.T) {
 	sender := &mockSender{
 		errs: []error{errors.New("fail1"), errors.New("fail2")},
 	}
+	req := domain.ClickEvent{UserID: 1}
 
-	sendWithRetry(context.Background(), sender, domain.ClickEvent{UserID: 1}, 5, discardLogger())
-
+	err := sendWithRetry(context.Background(), sender, req, retryCfg(3), discardLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 1-я попытка — fail1, 2-я — fail2, 3-я — успех.
 	if sender.count() != 3 {
 		t.Fatalf("calls = %d, want 3", sender.count())
 	}
@@ -112,30 +123,36 @@ func TestSendWithRetry_ExhaustsRetries(t *testing.T) {
 	sender := &mockSender{
 		errs: []error{errors.New("e1"), errors.New("e2"), errors.New("e3")},
 	}
+	req := domain.ClickEvent{UserID: 1}
 
-	sendWithRetry(context.Background(), sender, domain.ClickEvent{UserID: 1}, 3, discardLogger())
-
+	err := sendWithRetry(context.Background(), sender, req, retryCfg(3), discardLogger())
+	if err == nil {
+		t.Fatal("expected error after exhausted retries, got nil")
+	}
 	if sender.count() != 3 {
 		t.Fatalf("calls = %d, want 3", sender.count())
 	}
 }
 
+// Отмена до старта: ни одной попытки, ошибки нет (graceful).
 func TestSendWithRetry_ContextCancelledBeforeStart(t *testing.T) {
 	sender := &mockSender{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	sendWithRetry(ctx, sender, domain.ClickEvent{UserID: 1}, 3, discardLogger())
-
+	err := sendWithRetry(ctx, sender, domain.ClickEvent{UserID: 1}, retryCfg(1), discardLogger())
+	if err != nil {
+		t.Fatalf("expected nil (graceful abort), got %v", err)
+	}
 	if sender.count() != 0 {
 		t.Fatalf("calls = %d, want 0", sender.count())
 	}
 }
 
-// Отмена во время паузы между попытками не должна приводить к исчерпанию ретраев.
+// Отмена во время паузы между попытками — graceful abort, без исчерпания ретраев.
 func TestSendWithRetry_ContextCancelledDuringRetries(t *testing.T) {
 	old := initialSendBackoff
-	initialSendBackoff = 100 * time.Millisecond
+	initialSendBackoff = time.Second
 	t.Cleanup(func() { initialSendBackoff = old })
 
 	sender := &mockSender{errs: []error{
@@ -149,22 +166,25 @@ func TestSendWithRetry_ContextCancelledDuringRetries(t *testing.T) {
 		cancel()
 	}()
 
-	sendWithRetry(ctx, sender, domain.ClickEvent{UserID: 1}, 5, discardLogger())
-
-	// При отмене либо backoff-select, либо проверка ctx.Err() в начале итерации
-	// прерывают цикл, поэтому попыток должно быть меньше maxRetries.
-	// Точное число зависит от планировщика — проверяем именно свойство «не исчерпали».
-	if got := sender.count(); got == 0 || got >= 5 {
+	err := sendWithRetry(ctx, sender, domain.ClickEvent{UserID: 1}, retryCfg(5), discardLogger())
+	if err != nil {
+		t.Fatalf("expected nil (graceful abort), got %v", err)
+	}
+	// Первая попытка отправлена, дальше отмена прерывает backoff-select.
+	if got := sender.count(); got < 1 || got >= 5 {
 		t.Fatalf("calls = %d, want in [1, 4]", got)
 	}
 }
 
-// maxRetries <= 0 нормализуется в 1 внутри sendWithRetry.
+// MaxRetries <= 0 нормализуется в 1 внутри sendWithRetry.
 func TestSendWithRetry_MaxRetriesLowerBound(t *testing.T) {
 	sender := &mockSender{errs: []error{errors.New("fail")}}
+	cfg := config.Sender{MaxRetries: 0, SendTimeout: time.Second}
 
-	sendWithRetry(context.Background(), sender, domain.ClickEvent{UserID: 1}, 0, discardLogger())
-
+	err := sendWithRetry(context.Background(), sender, domain.ClickEvent{UserID: 1}, cfg, discardLogger())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
 	if sender.count() != 1 {
 		t.Fatalf("calls = %d, want 1", sender.count())
 	}
@@ -172,10 +192,10 @@ func TestSendWithRetry_MaxRetriesLowerBound(t *testing.T) {
 
 // --- NewSimulator ---
 
-func TestNewSimulator_DefaultMaxRetries(t *testing.T) {
+func TestNewSimulator_NormalizesRetries(t *testing.T) {
 	strat := &mockStrategy{}
-	sim := NewSimulator(strat, &mockSender{}, 0, discardLogger())
-	sim.Run(context.Background())
+	sim := NewSimulator(strat, &mockSender{}, config.Sender{MaxRetries: -5, SendTimeout: time.Second}, discardLogger())
+	_ = sim.Run(context.Background())
 
 	if strat.gotMaxRetries != 1 {
 		t.Fatalf("maxRetries = %d, want 1", strat.gotMaxRetries)
@@ -186,15 +206,16 @@ func TestNewSimulator_DefaultMaxRetries(t *testing.T) {
 
 func TestSimulator_Run_CallsStrategy(t *testing.T) {
 	strat := &mockStrategy{name: "test", users: 3}
-	sim := NewSimulator(strat, &mockSender{}, 2, discardLogger())
+	sim := NewSimulator(strat, &mockSender{}, retryCfg(1), discardLogger())
 
-	sim.Run(context.Background())
-
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if !strat.called {
 		t.Fatal("strategy.Run was not called")
 	}
-	if strat.gotMaxRetries != 2 {
-		t.Fatalf("maxRetries = %d, want 2", strat.gotMaxRetries)
+	if strat.gotMaxRetries != 1 {
+		t.Fatalf("maxRetries = %d, want 1", strat.gotMaxRetries)
 	}
 }
 
@@ -203,14 +224,16 @@ func TestSimulator_Run_StrategyErrorLogged(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	strat := &mockStrategy{
 		name: "test",
-		runFn: func(context.Context, domain.ClickSender, int) error {
+		runFn: func(context.Context, domain.ClickSender, config.Sender) error {
 			return errors.New("strategy failed")
 		},
 	}
-	sim := NewSimulator(strat, &mockSender{}, 1, logger)
+	sim := NewSimulator(strat, &mockSender{}, retryCfg(1), logger)
 
-	sim.Run(context.Background())
-
+	err := sim.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error from Simulator.Run")
+	}
 	if !bytes.Contains(buf.Bytes(), []byte("simulation stopped with error")) {
 		t.Fatalf("expected error log, got: %s", buf.String())
 	}
@@ -220,17 +243,38 @@ func TestSimulator_Run_InterruptedLogged(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	strat := &mockStrategy{
-		name: "test",
-		// Возвращаем nil, но ctx уже отменён — Simulator должен залогировать "interrupted".
-		runFn: func(context.Context, domain.ClickSender, int) error { return nil },
+		name:  "test",
+		runFn: func(context.Context, domain.ClickSender, config.Sender) error { return nil },
 	}
-	sim := NewSimulator(strat, &mockSender{}, 1, logger)
+	sim := NewSimulator(strat, &mockSender{}, retryCfg(1), logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	sim.Run(ctx)
 
+	err := sim.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected nil on interrupted run, got %v", err)
+	}
 	if !bytes.Contains(buf.Bytes(), []byte("simulation interrupted")) {
 		t.Fatalf("expected interrupted log, got: %s", buf.String())
+	}
+}
+
+// Отмена контекста имеет приоритет над ошибкой стратегии:
+// SIGTERM во время прогона не должен давать exit code 1.
+func TestSimulator_Run_ContextCanceledTakesPriority(t *testing.T) {
+	strat := &mockStrategy{
+		name: "test",
+		runFn: func(context.Context, domain.ClickSender, config.Sender) error {
+			return errors.New("some send failure")
+		},
+	}
+	sim := NewSimulator(strat, &mockSender{}, retryCfg(1), discardLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := sim.Run(ctx); err != nil {
+		t.Fatalf("expected nil (ctx canceled wins over strategy error), got %v", err)
 	}
 }
