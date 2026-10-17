@@ -2,19 +2,22 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.services.communication.dzen/app/ClickImitator/internal/domain"
 	"go.services.communication.dzen/app/ClickImitator/pkg/config"
 )
 
-// ScenarioStrategy — воспроизведение заранее заданных сценариев.
 type ScenarioStrategy struct {
 	cfg       config.Scenario
 	scenarios []domain.Scenario
 	logger    *slog.Logger
+	completed atomic.Int64
+	failed    atomic.Int64
 }
 
 func NewScenarioStrategy(cfg config.Scenario, scenarios []domain.Scenario, logger *slog.Logger) *ScenarioStrategy {
@@ -23,31 +26,40 @@ func NewScenarioStrategy(cfg config.Scenario, scenarios []domain.Scenario, logge
 
 func (s *ScenarioStrategy) Name() string { return "scenario" }
 
-func (s *ScenarioStrategy) TotalUsers() int64 {
-	return int64(len(s.scenarios))
-}
+func (s *ScenarioStrategy) TotalUsers() int64 { return int64(len(s.scenarios)) }
 
-func (s *ScenarioStrategy) Run(ctx context.Context, sender domain.ClickSender, maxRetries int) error {
+func (s *ScenarioStrategy) Run(ctx context.Context, sender domain.ClickSender, scfg config.Sender) error {
 	total := len(s.scenarios)
 	s.logger.Info("scenario mode", "users", total)
 
-	var mainWg sync.WaitGroup
+	var wg sync.WaitGroup
 	for _, sc := range s.scenarios {
-		mainWg.Add(1)
-		go s.runReader(ctx, sender, maxRetries, sc, &mainWg)
+		wg.Add(1)
+		go s.runReader(ctx, sender, scfg, sc, &wg)
 	}
-	mainWg.Wait()
+	wg.Wait()
+
+	if n := s.failed.Load(); n > 0 {
+		return fmt.Errorf("%d send(s) failed", n)
+	}
 	return nil
 }
 
 func (s *ScenarioStrategy) runReader(
 	ctx context.Context,
 	sender domain.ClickSender,
-	maxRetries int,
+	scfg config.Sender,
 	sc domain.Scenario,
-	mainWg *sync.WaitGroup,
+	wg *sync.WaitGroup,
 ) {
-	defer mainWg.Done()
+	defer wg.Done()
+	defer func() {
+		n := s.completed.Add(1)
+		s.logger.Info("reader finished",
+			"reader_id", sc.UserID,
+			"completed", n,
+			"total", s.TotalUsers())
+	}()
 
 	var readWg sync.WaitGroup
 	for _, authorID := range sc.Authors {
@@ -59,7 +71,9 @@ func (s *ScenarioStrategy) runReader(
 				AuthorID:  aID,
 				Timestamp: time.Now().UTC(),
 			}
-			sendWithRetry(ctx, sender, req, maxRetries, s.logger)
+			if err := sendWithRetry(ctx, sender, req, scfg, s.logger); err != nil {
+				s.failed.Add(1)
+			}
 		}(authorID)
 
 		if s.cfg.DelayBetweenReadsSec > 0 {

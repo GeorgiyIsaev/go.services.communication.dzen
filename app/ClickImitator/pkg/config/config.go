@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// GeneratorMode — режим работы имитатора.
 type GeneratorMode string
 
 const (
@@ -19,17 +19,15 @@ const (
 	ModeScenario GeneratorMode = "scenario"
 )
 
-// Kafka — параметры подключения и топика.
 type Kafka struct {
 	Brokers           []string
 	Topic             string
 	Partitions        int
 	ReplicationFactor int
-	Retention         time.Duration // TTL сообщений в топике
-	Segment           time.Duration // период ротации сегментов
+	Retention         time.Duration
+	Segment           time.Duration
 }
 
-// Random — параметры случайной генерации (режим random).
 type Random struct {
 	AuthorIDStart        int64
 	AuthorIDEnd          int64
@@ -40,19 +38,19 @@ type Random struct {
 	DelayBetweenReadsSec int
 }
 
-// Scenario — параметры сценарного режима (режим scenario).
 type Scenario struct {
 	Dir                  string
 	DelayBetweenReadsSec int
 }
 
-// Sender — общие параметры отправки в Kafka.
 type Sender struct {
-	MaxRetries int
+	MaxRetries  int
+	SendTimeout time.Duration
 }
 
 type Config struct {
 	Mode     GeneratorMode
+	LogLevel slog.Level
 	Kafka    Kafka
 	Random   Random
 	Scenario Scenario
@@ -70,8 +68,14 @@ func Load() *Config {
 		mode = ModeRandom
 	}
 
+	maxRetries := getEnvInt("MAX_RETRIES", 5)
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
+
 	return &Config{
-		Mode: mode,
+		Mode:     mode,
+		LogLevel: parseLogLevel(getEnv("LOG_LEVEL", "info")),
 		Kafka: Kafka{
 			Brokers:           getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092", "localhost:9093", "localhost:9094"}),
 			Topic:             getEnv("KAFKA_TOPIC", "clicks"),
@@ -94,12 +98,12 @@ func Load() *Config {
 			DelayBetweenReadsSec: getEnvInt("DELAY_BETWEEN_READS_SEC", 0),
 		},
 		Sender: Sender{
-			MaxRetries: getEnvInt("MAX_RETRIES", 5),
+			MaxRetries:  maxRetries,
+			SendTimeout: getEnvDuration("SEND_TIMEOUT", 5*time.Second),
 		},
 	}
 }
 
-// Validate проверяет конфиг в зависимости от выбранного режима.
 func (c *Config) Validate() error {
 	if len(c.Kafka.Brokers) == 0 {
 		return fmt.Errorf("kafka_brokers не заданы")
@@ -112,9 +116,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Kafka.ReplicationFactor <= 0 {
 		return fmt.Errorf("kafka_replication_factor должен быть > 0")
-	}
-	if c.Sender.MaxRetries < 0 {
-		return fmt.Errorf("max_retries должен быть >= 0")
 	}
 
 	switch c.Mode {
@@ -146,6 +147,15 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func parseLogLevel(s string) slog.Level {
+	var lvl slog.Level
+	if err := lvl.UnmarshalText([]byte(s)); err != nil {
+		log.Printf("config: invalid LOG_LEVEL=%q, using info", s)
+		return slog.LevelInfo
+	}
+	return lvl
 }
 
 // -- helpers --

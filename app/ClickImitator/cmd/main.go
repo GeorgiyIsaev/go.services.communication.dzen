@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,17 +15,16 @@ import (
 )
 
 func main() {
-	appLogger := logger.New(slog.LevelInfo)
+	cfg := config.Load()
+	appLogger := logger.New(cfg.LogLevel)
 
-	if err := run(appLogger); err != nil {
+	if err := run(cfg, appLogger); err != nil {
 		appLogger.Error("service stopped with error", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(appLogger *slog.Logger) error {
-	cfg := config.Load()
-
+func run(cfg *config.Config, appLogger *slog.Logger) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -33,25 +32,10 @@ func run(appLogger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 1. Создаём топик с retention 48ч.
-	if err := client.EnsureTopic(
-		cfg.Kafka.Brokers,
-		cfg.Kafka.Topic,
-		cfg.Kafka.Partitions,
-		cfg.Kafka.ReplicationFactor,
-		cfg.Kafka.Retention,
-		cfg.Kafka.Segment,
-	); err != nil {
+	if err := client.EnsureTopic(ctx, cfg.Kafka, appLogger); err != nil {
 		return err
 	}
-	appLogger.Info("topic ready",
-		"topic", cfg.Kafka.Topic,
-		"partitions", cfg.Kafka.Partitions,
-		"rf", cfg.Kafka.ReplicationFactor,
-		"retention", cfg.Kafka.Retention.String(),
-		"segment", cfg.Kafka.Segment.String())
 
-	// 2. Kafka sender.
 	sender, err := client.NewKafkaClickSender(cfg.Kafka.Brokers, cfg.Kafka.Topic)
 	if err != nil {
 		return err
@@ -62,15 +46,14 @@ func run(appLogger *slog.Logger) error {
 		}
 	}()
 
-	// 3. Стратегия в зависимости от режима.
 	strategy, err := buildStrategy(cfg, appLogger)
 	if err != nil {
 		return err
 	}
 
-	// 4. Симулятор.
-	sim := service.NewSimulator(strategy, sender, cfg.Sender.MaxRetries, appLogger)
-	sim.Run(ctx)
+	if err := service.NewSimulator(strategy, sender, cfg.Sender, appLogger).Run(ctx); err != nil {
+		return err
+	}
 
 	appLogger.Info("shutdown complete")
 	return nil
@@ -86,12 +69,8 @@ func buildStrategy(cfg *config.Config, appLogger *slog.Logger) (service.Strategy
 		if err != nil {
 			return nil, err
 		}
-		appLogger.Info("scenarios loaded",
-			"dir", cfg.Scenario.Dir, "count", len(scenarios))
+		appLogger.Info("scenarios loaded", "dir", cfg.Scenario.Dir, "count", len(scenarios))
 		return service.NewScenarioStrategy(cfg.Scenario, scenarios, appLogger), nil
-
-	default:
-		// config.Load уже гарантирует валидный режим, но на всякий случай.
-		return nil, errors.New("unknown generator mode: " + string(cfg.Mode))
 	}
+	return nil, fmt.Errorf("unknown generator mode %q", cfg.Mode)
 }

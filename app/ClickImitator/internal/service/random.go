@@ -2,19 +2,22 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.services.communication.dzen/app/ClickImitator/internal/domain"
 	"go.services.communication.dzen/app/ClickImitator/pkg/config"
 )
 
-// RandomStrategy — генерация случайных кликов из диапазона.
 type RandomStrategy struct {
-	cfg    config.Random
-	logger *slog.Logger
+	cfg       config.Random
+	logger    *slog.Logger
+	completed atomic.Int64
+	failed    atomic.Int64
 }
 
 func NewRandomStrategy(cfg config.Random, logger *slog.Logger) *RandomStrategy {
@@ -27,31 +30,42 @@ func (s *RandomStrategy) TotalUsers() int64 {
 	return s.cfg.ReaderIDEnd - s.cfg.ReaderIDStart + 1
 }
 
-func (s *RandomStrategy) Run(ctx context.Context, sender domain.ClickSender, maxRetries int) error {
-	totalReaders := s.TotalUsers()
-	s.logger.Info("random mode", "readers", totalReaders)
+func (s *RandomStrategy) Run(ctx context.Context, sender domain.ClickSender, scfg config.Sender) error {
+	total := s.TotalUsers()
+	s.logger.Info("random mode", "readers", total)
 
-	var mainWg sync.WaitGroup
+	var wg sync.WaitGroup
 	for readerID := s.cfg.ReaderIDStart; readerID <= s.cfg.ReaderIDEnd; readerID++ {
-		mainWg.Add(1)
-		go s.runReader(ctx, sender, maxRetries, readerID, &mainWg)
+		wg.Add(1)
+		go s.runReader(ctx, sender, scfg, readerID, &wg)
 	}
-	mainWg.Wait()
+	wg.Wait()
+
+	if n := s.failed.Load(); n > 0 {
+		return fmt.Errorf("%d send(s) failed", n)
+	}
 	return nil
 }
 
 func (s *RandomStrategy) runReader(
 	ctx context.Context,
 	sender domain.ClickSender,
-	maxRetries int,
+	scfg config.Sender,
 	readerID int64,
-	mainWg *sync.WaitGroup,
+	wg *sync.WaitGroup,
 ) {
-	defer mainWg.Done()
+	defer wg.Done()
+	defer func() {
+		n := s.completed.Add(1)
+		s.logger.Info("reader finished",
+			"reader_id", readerID,
+			"completed", n,
+			"total", s.TotalUsers())
+	}()
 
 	numReads := rand.Intn(s.cfg.MaxReads-s.cfg.MinReads+1) + s.cfg.MinReads
-
 	var readWg sync.WaitGroup
+
 	for i := 0; i < numReads; i++ {
 		authorID := rand.Int63n(s.cfg.AuthorIDEnd-s.cfg.AuthorIDStart+1) + s.cfg.AuthorIDStart
 		readWg.Add(1)
@@ -62,7 +76,9 @@ func (s *RandomStrategy) runReader(
 				AuthorID:  aID,
 				Timestamp: time.Now().UTC(),
 			}
-			sendWithRetry(ctx, sender, req, maxRetries, s.logger)
+			if err := sendWithRetry(ctx, sender, req, scfg, s.logger); err != nil {
+				s.failed.Add(1)
+			}
 		}(authorID)
 
 		if s.cfg.DelayBetweenReadsSec > 0 {

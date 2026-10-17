@@ -2,92 +2,88 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"time"
 
 	"go.services.communication.dzen/app/ClickImitator/internal/domain"
+	"go.services.communication.dzen/app/ClickImitator/pkg/config"
 )
 
-// initialSendBackoff — стартовая пауза перед повтором. (для тестов)
 var initialSendBackoff = 500 * time.Millisecond
 
-// Strategy — источник «что и кому отправить». Random и Scenario реализуют его.
 type Strategy interface {
-	// Name — для логов.
 	Name() string
-	// TotalUsers — сколько пользователей в сценарии (для прогресс-логов).
 	TotalUsers() int64
-	// Run запускает симуляцию до завершения или отмены ctx.
-	Run(ctx context.Context, sender domain.ClickSender, maxRetries int) error
+	Run(ctx context.Context, sender domain.ClickSender, cfg config.Sender) error
 }
 
-// Simulator — общий каркас, который держит стратегию и логирует прогресс.
 type Simulator struct {
-	strategy   Strategy
-	sender     domain.ClickSender
-	maxRetries int
-	logger     *slog.Logger
-
-	completed int64 // atomic
+	strategy Strategy
+	sender   domain.ClickSender
+	cfg      config.Sender
+	logger   *slog.Logger
 }
 
-func NewSimulator(strategy Strategy, sender domain.ClickSender, maxRetries int, logger *slog.Logger) *Simulator {
-	if maxRetries <= 0 {
-		maxRetries = 1
+func NewSimulator(strategy Strategy, sender domain.ClickSender, cfg config.Sender, logger *slog.Logger) *Simulator {
+	if cfg.MaxRetries <= 0 {
+		cfg.MaxRetries = 1
 	}
-	return &Simulator{
-		strategy:   strategy,
-		sender:     sender,
-		maxRetries: maxRetries,
-		logger:     logger,
+	if cfg.SendTimeout <= 0 {
+		cfg.SendTimeout = 5 * time.Second
 	}
+	return &Simulator{strategy: strategy, sender: sender, cfg: cfg, logger: logger}
 }
 
-func (s *Simulator) Run(ctx context.Context) {
+func (s *Simulator) Run(ctx context.Context) error {
 	s.logger.Info("simulation started",
 		"mode", s.strategy.Name(),
 		"users", s.strategy.TotalUsers())
 
-	if err := s.strategy.Run(ctx, s.sender, s.maxRetries); err != nil {
+	err := s.strategy.Run(ctx, s.sender, s.cfg)
+	if err != nil {
 		s.logger.Error("simulation stopped with error", "err", err)
-		return
+		return err
 	}
-
 	if ctx.Err() != nil {
 		s.logger.Info("simulation interrupted")
-		return
+		return nil
 	}
 	s.logger.Info("simulation completed")
+	return nil
 }
 
-// sendWithRetry — общая функция отправки с ретраями и экспоненциальным backoff.
-func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.ClickEvent, maxRetries int, logger *slog.Logger) {
-	if maxRetries <= 0 {
-		maxRetries = 1
+func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.ClickEvent, cfg config.Sender, logger *slog.Logger) error {
+	attempts := cfg.MaxRetries
+	if attempts <= 0 {
+		attempts = 1
 	}
-	backoff := initialSendBackoff
+	timeout := cfg.SendTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	backoff := initialSendBackoff
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			logger.Info("send interrupted",
-				"user_id", req.UserID, "author_id", req.AuthorID, "err", err)
-			return
+			return err
 		}
 
-		sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		sendCtx, cancel := context.WithTimeout(ctx, timeout)
 		err := sender.Send(sendCtx, req)
 		cancel()
 
 		if err == nil {
-			return
+			return nil
 		}
-
+		lastErr = err
 		logger.Warn("send attempt failed",
 			"user_id", req.UserID, "author_id", req.AuthorID,
-			"attempt", attempt, "max", maxRetries, "err", err)
+			"attempt", attempt, "max", attempts, "err", err)
 
-		if attempt < maxRetries {
+		if attempt < attempts {
 			half := int64(backoff / 2)
 			var jitter time.Duration
 			if half > 0 {
@@ -96,7 +92,7 @@ func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.Cl
 			select {
 			case <-time.After(backoff + jitter):
 			case <-ctx.Done():
-				return
+				return ctx.Err()
 			}
 			backoff *= 2
 		}
@@ -104,4 +100,5 @@ func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.Cl
 
 	logger.Error("send exhausted retries",
 		"user_id", req.UserID, "author_id", req.AuthorID)
+	return fmt.Errorf("send failed after %d attempt(s): %w", attempts, lastErr)
 }

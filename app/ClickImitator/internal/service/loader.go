@@ -8,13 +8,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"go.services.communication.dzen/app/ClickImitator/internal/domain"
 )
 
-// LoadScenarios читает все *.scenario из папки dir.
-// Файлы обрабатываются в лексикографическом порядке имён.
 func LoadScenarios(dir string) ([]domain.Scenario, error) {
 	files, err := scenarioFiles(dir)
 	if err != nil {
@@ -97,18 +94,21 @@ func buildScenarios(lines []line) ([]domain.Scenario, error) {
 	var (
 		scenarios []domain.Scenario
 		current   *domain.Scenario
+		startLine int
 	)
+
 	flush := func() error {
 		if current == nil {
 			return nil
 		}
 		if err := current.Validate(); err != nil {
-			return err
+			return fmt.Errorf("строка %d: %w", startLine, err)
 		}
 		scenarios = append(scenarios, *current)
 		current = nil
 		return nil
 	}
+
 	for _, ln := range lines {
 		switch {
 		case strings.HasPrefix(ln.text, "user_id"):
@@ -126,6 +126,8 @@ func buildScenarios(lines []line) ([]domain.Scenario, error) {
 				return nil, fmt.Errorf("строка %d: user_id должен быть положительным, получено %d", ln.num, id)
 			}
 			current = &domain.Scenario{UserID: id}
+			startLine = ln.num
+
 		case strings.HasPrefix(ln.text, "authors"):
 			if current == nil {
 				return nil, fmt.Errorf("строка %d: authors без user_id", ln.num)
@@ -146,24 +148,14 @@ func buildScenarios(lines []line) ([]domain.Scenario, error) {
 				}
 				current.Authors = append(current.Authors, id)
 			}
+
 		default:
-			if isComment(ln.text) {
-				continue
-			}
 			return nil, fmt.Errorf("строка %d: неизвестная директива %q", ln.num, ln.text)
 		}
 	}
+
 	if err := flush(); err != nil {
 		return nil, err
 	}
 	return scenarios, nil
-}
-
-func isComment(s string) bool {
-	for _, r := range s {
-		if !unicode.IsSpace(r) && r != '#' {
-			return false
-		}
-	}
-	return true
 }
