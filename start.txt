@@ -9,3 +9,6 @@ docker-compose up -d
 
 # Удалить тома вместе с контейнерами (очистить данные)
 docker-compose down -v
+
+Для рестарта clickimitator внутри докер
+docker compose restart clickimitator
