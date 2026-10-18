@@ -7,7 +7,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"go.services.communication.dzen/app/ClickDashboard/pkg/reqid"
+	"go.services.communication.dzen/app/ClickCounter/pkg/reqid"
 )
 
 // RequestID присваивает каждому запросу уникальный ID

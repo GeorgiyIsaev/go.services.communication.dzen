@@ -1,28 +1,26 @@
-// Package middleware содержит HTTP-middleware общего назначения.
 package middleware
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"go.services.communication.dzen/app/StorageGateway/pkg/reqid"
 )
-
-const headerRequestID = "X-Request-ID"
 
 // RequestID присваивает каждому запросу уникальный ID
 // (или берёт его из заголовка X-Request-ID, если запрос пришёл от другого сервиса),
 // кладёт в context.Context и возвращает в ответном заголовке.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := r.Header.Get(headerRequestID)
-		// Отсекаем мусорные значения от клиента.
-		if id == "" || len(id) > 128 {
+		id := r.Header.Get(reqid.HeaderName)
+		if !reqid.ValidReqID(id) {
 			id = reqid.New()
 		}
 
-		w.Header().Set(headerRequestID, id)
+		w.Header().Set(reqid.HeaderName, id)
 
 		ctx := reqid.WithContext(r.Context(), id)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -30,8 +28,7 @@ func RequestID(next http.Handler) http.Handler {
 }
 
 // Logging пишет access-log по каждому запросу.
-// request_id подхватывается автоматически slog-хендлером из ctx,
-// поэтому отдельно передавать его в атрибуты не нужно.
+// request_id подхватывается автоматически slog-хендлером из ctx.
 func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +59,30 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// responseWriter запоминает статус и число записанных байт.
+// Recover ловит панику в хендлерах, логирует её со стеком
+// и возвращает 500 вместо обрыва соединения.
+func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					if rec == http.ErrAbortHandler {
+						panic(rec)
+					}
+					logger.ErrorContext(r.Context(), "panic recovered",
+						"err", rec,
+						"method", r.Method,
+						"path", r.URL.Path,
+						"stack", string(debug.Stack()),
+					)
+					writeError(w, http.StatusInternalServerError, "internal error")
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 type responseWriter struct {
 	http.ResponseWriter
 	status      int
@@ -72,7 +92,7 @@ type responseWriter struct {
 
 func (w *responseWriter) WriteHeader(code int) {
 	if w.wroteHeader {
-		return // повторный WriteHeader игнорируется, как в net/http
+		return
 	}
 	w.status = code
 	w.wroteHeader = true
@@ -86,4 +106,10 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.bytes += n
 	return n, err
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

@@ -1,5 +1,3 @@
-// Package logger создаёт slog.Logger с JSON-выводом в stdout
-// и автоматическим добавлением request_id из context.Context.
 package logger
 
 import (
@@ -19,8 +17,7 @@ func New(level slog.Level) *slog.Logger {
 	return slog.New(&contextHandler{Handler: base})
 }
 
-// contextHandler оборачивает любой slog.Handler и обогащает записи
-// атрибутами, которые достаёт из context.Context (сейчас — request_id).
+// contextHandler оборачивает slog.Handler и добавляет request_id из ctx.
 type contextHandler struct {
 	slog.Handler
 }
@@ -32,8 +29,8 @@ func (h *contextHandler) Handle(ctx context.Context, r slog.Record) error {
 	return h.Handler.Handle(ctx, r)
 }
 
-// WithAttrs / WithGroup нужно переопределить, иначе цепочка
-// logger.With(...) потеряет нашу обёртку и request_id перестанет добавляться.
+// WithAttrs / WithGroup нужно переопределить, иначе logger.With(...)
+// потеряет нашу обёртку и request_id перестанет добавляться.
 func (h *contextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &contextHandler{Handler: h.Handler.WithAttrs(attrs)}
 }

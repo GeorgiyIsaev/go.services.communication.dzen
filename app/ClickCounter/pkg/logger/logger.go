@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"go.services.communication.dzen/app/ClickDashboard/pkg/reqid"
+	"go.services.communication.dzen/app/ClickCounter/pkg/reqid"
 )
 
 // New возвращает логгер: JSONHandler в stdout + обёртка,

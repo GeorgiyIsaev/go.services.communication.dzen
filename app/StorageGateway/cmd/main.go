@@ -47,10 +47,8 @@ func run(appLogger *slog.Logger) error {
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	// Порядок: RequestID → Logging → mux.
-	// RequestID снаружи, чтобы request_id попал в ctx до того, как Logging
-	// начнёт писать access-log. Затем Logging, затем — сами хендлеры.
 	var h http.Handler = mux
+	h = middleware.Recover(appLogger)(h)
 	h = middleware.Logging(appLogger)(h)
 	h = middleware.RequestID(h)
 

@@ -128,7 +128,7 @@ func ensureAuthors(ctx context.Context, tx *sql.Tx, stats []domain.AuthorStats) 
 	if _, err := tx.ExecContext(ctx, `
 		SELECT setval(
 			pg_get_serial_sequence('authors', 'id'),
-			GREATEST((SELECT COALESCE(MAX(id), 1) FROM authors), 1)
+			GREATEST((SELECT COALESCE(MAX(id), 0) FROM authors), 1)
 		)`); err != nil {
 		return fmt.Errorf("setval authors_id_seq: %w", err)
 	}

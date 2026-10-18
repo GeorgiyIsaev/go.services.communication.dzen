@@ -34,9 +34,7 @@ func Connect(ctx context.Context, cfg *config.Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 
-	// golang-migrate не принимает ctx в Up() — отмена сигналом тут не сработает.
-	// Если это станет проблемой, можно обернуть вызов в goroutine + select на ctx.Done()
-	// (см. m.GracefulStop). Пока оставляем как есть: старт ограничен TCP/DB-таймаутами.
+	//TODO filepath.Join(filepath.Dir(os.Args[0]), "migrations") - если не срабоатет в докере (протестить позже)
 	if err := runMigrations(sqlDB, "file://app/StorageGateway/migrations"); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
