@@ -64,11 +64,8 @@ func run(appLogger *slog.Logger) error {
 	handler = middleware.RequestID(handler)
 
 	srv := &http.Server{
-		Addr:    ":" + cfg.ServerPort,
-		Handler: handler,
-		// ReadHeaderTimeout / IdleTimeout — стандартные.
-		// ReadTimeout / WriteTimeout = 35s, чуть больше внутреннего таймаута /stats (30s),
-		// чтобы сервер успел вернуть клиенту 504, а не оборвал соединение раньше.
+		Addr:              ":" + cfg.ServerPort,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       35 * time.Second,
 		WriteTimeout:      35 * time.Second,

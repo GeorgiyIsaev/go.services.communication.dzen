@@ -78,7 +78,7 @@ func (s *StatsService) GetStats(ctx context.Context, days int) (*domain.StatsMat
 	// errgroup: g.Wait() вернёт первую ошибку, остальные запросы отменятся через gCtx.
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// Параллельный запрос авторов.
+	// запрос авторов.
 	var authors []domain.Author
 	g.Go(func() error {
 		a, err := s.client.GetAuthors(gCtx)
@@ -89,11 +89,10 @@ func (s *StatsService) GetStats(ctx context.Context, days int) (*domain.StatsMat
 		return nil
 	})
 
-	// Параллельные запросы статистики по дням.
-	// statsByDate[i] соответствует dates[i]. Каждая горутина пишет в свой индекс — race-free.
+	// запросы статистики по дням.
 	statsByDate := make([][]domain.AuthorStats, len(dates))
 	for i, d := range dates {
-		i, d := i, d // локальные копии для замыкания (Go < 1.22)
+		i, d := i, d
 		g.Go(func() error {
 			// Заходим в семафор или отменяемся, если контекст уже отменён.
 			select {

@@ -90,13 +90,9 @@ func (c *StorageGatewayClient) doJSON(ctx context.Context, method, path string, 
 
 	switch {
 	case resp.StatusCode >= 500:
-		// 5xx от StorageGateway — не тянем тело, там может быть
-		// внутренняя информация (имена таблиц, SQL и т.п.).
 		return fmt.Errorf("%w: status %d", ErrUpstreamBadResponse, resp.StatusCode)
 
 	case resp.StatusCode >= 400:
-		// 4xx обычно валидация — тело безопасно показать наверх.
-		// Ограничиваем размер, чтобы не тянуть гигантский ответ.
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("%w: status %d, body: %s", ErrUpstreamBadResponse, resp.StatusCode, body)
 	}

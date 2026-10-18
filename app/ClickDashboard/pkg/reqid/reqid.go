@@ -4,12 +4,19 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"regexp"
 )
 
 // HeaderName — HTTP-заголовок, через который request_id передаётся между сервисами.
 const HeaderName = "X-Request-ID"
 
 type ctxKey struct{}
+
+var validID = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
+
+func ValidReqID(id string) bool {
+	return validID.MatchString(id)
+}
 
 // WithContext возвращает контекст с установленным request_id.
 func WithContext(ctx context.Context, id string) context.Context {

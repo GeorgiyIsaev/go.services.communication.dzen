@@ -50,20 +50,12 @@ func (h *StatsHandler) Health(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetStats обрабатывает GET /stats?days=N.
-//
-// Ответ 200:
-//
-//	{"dates": ["2024-01-15", ...], "authors": [...], "max_days": 30}
-//
-// Ошибки:
-//   - 400 — days не положительное число или > max_days
-//   - 502 — StorageGateway недоступен или вернул ошибку
-//   - 504 — общий таймаут 30 сек
-//   - 500 — что-то другое
 func (h *StatsHandler) GetStats(w http.ResponseWriter, r *http.Request) {
-	const defaultDays = 5
+	days := min(5, h.svc.MaxDays())
+	if days < 1 {
+		days = 1
+	}
 
-	days := defaultDays
 	if v := r.URL.Query().Get("days"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {
@@ -82,7 +74,6 @@ func (h *StatsHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Общий таймаут на весь запрос /stats, включая все параллельные вызовы StorageGateway.
-	// Клиентский таймаут на один запрос задан в config (STORAGE_GATEWAY_TIMEOUT).
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
@@ -93,19 +84,18 @@ func (h *StatsHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrInvalidDays):
 			h.logger.WarnContext(r.Context(), "invalid days", "err", err)
 			writeError(w, http.StatusBadRequest, err.Error())
-
 		case errors.Is(err, context.DeadlineExceeded):
 			h.logger.ErrorContext(r.Context(), "request timed out",
 				"err", err, "days", days, "duration", time.Since(start))
 			writeError(w, http.StatusGatewayTimeout, "upstream timeout")
-
 		case errors.Is(err, service.ErrUpstream):
-			// Не раскрываем детали наружу — только общее сообщение.
-			// Реальные детали (HTTP status, тело) — в логах выше.
 			h.logger.ErrorContext(r.Context(), "upstream error",
 				"err", err, "days", days, "duration", time.Since(start))
 			writeError(w, http.StatusBadGateway, "storage gateway unavailable")
-
+		case errors.Is(err, context.Canceled):
+			h.logger.InfoContext(r.Context(), "request canceled by client",
+				"days", days, "duration", time.Since(start))
+			return
 		default:
 			h.logger.ErrorContext(r.Context(), "internal error",
 				"err", err, "days", days)

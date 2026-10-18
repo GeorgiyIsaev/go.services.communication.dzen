@@ -172,19 +172,36 @@ func TestGetStats_ErrorMapping(t *testing.T) {
 	}
 }
 
-//TODO проблема если в настройках меньше 5 дней упадем
-//func TestGetStats_DefaultDaysRespectsMax(t *testing.T) {
-//	svc := &mockStatsService{
-//		matrix:  &domain.StatsMatrix{},
-//		maxDays: 3,
-//	}
-//	mux := newTestMux(svc)
-//
-//	rec := doRequest(mux, http.MethodGet, "/stats")
-//	if rec.Code != http.StatusOK {
-//		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
-//	}
-//	if svc.gotDays != 3 {
-//		t.Errorf("service got days = %d, want 3 (clamped to max)", svc.gotDays)
-//	}
-//}
+// TODO проблема если в настройках меньше 5 дней упадем
+func TestGetStats_DefaultDaysRespectsMax(t *testing.T) {
+	svc := &mockStatsService{
+		matrix:  &domain.StatsMatrix{},
+		maxDays: 3,
+	}
+	mux := newTestMux(svc)
+
+	rec := doRequest(mux, http.MethodGet, "/stats")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if svc.gotDays != 3 {
+		t.Errorf("service got days = %d, want 3 (clamped to max)", svc.gotDays)
+	}
+}
+
+// Тест ошибки 500 при потери клиента
+func TestGetStats_ClientCanceled_NoWrite(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // отменили до вызова
+
+	svc := &mockStatsService{err: context.Canceled}
+	mux := newTestMux(svc)
+	req := httptest.NewRequest(http.MethodGet, "/stats?days=1", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	// Главное: 500-ку не отдаём.
+	if rec.Code == http.StatusInternalServerError {
+		t.Errorf("got 500 for canceled request, want no 5xx")
+	}
+}

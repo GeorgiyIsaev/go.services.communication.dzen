@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -17,7 +16,7 @@ import (
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(reqid.HeaderName)
-		if id == "" || len(id) > 128 {
+		if !reqid.ValidReqID(id) {
 			id = reqid.New()
 		}
 
@@ -114,6 +113,3 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
-
-// не даём линтеру ругаться на неиспользуемый импорт в будущем
-var _ = context.Background

@@ -31,7 +31,7 @@ func Load() *Config {
 		StorageGatewayURL:     getEnv("STORAGE_GATEWAY_URL", "http://localhost:8084"),
 		StorageGatewayTimeout: getEnvDuration("STORAGE_GATEWAY_TIMEOUT", 10*time.Second),
 
-		MaxDays: getEnvInt("MAX_DAYS", 30),
+		MaxDays: getEnvMaxDays("MAX_DAYS", 30),
 	}
 }
 
@@ -42,7 +42,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func getEnvInt(key string, fallback int) int {
+func getEnvMaxDays(key string, fallback int) int {
 	v, ok := os.LookupEnv(key)
 	if !ok || v == "" {
 		return fallback
@@ -51,6 +51,9 @@ func getEnvInt(key string, fallback int) int {
 	if err != nil {
 		log.Printf("config: invalid int for %s=%q, using default %d", key, v, fallback)
 		return fallback
+	}
+	if n < 1 {
+		log.Fatalf("config: %s must be >= 1, got %d", key, n)
 	}
 	return n
 }
