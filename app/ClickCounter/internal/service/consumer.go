@@ -64,7 +64,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 		at := msg.Time
 		if at.IsZero() {
-			at = time.Now()
+			at = time.Now().UTC() // ← UTC
 		}
 		c.tracker.AddClickAt(m.AuthorID, m.UserID, at)
 	}

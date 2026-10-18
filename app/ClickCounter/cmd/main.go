@@ -56,6 +56,9 @@ func run(appLogger *slog.Logger) error {
 	// 5. Scheduler — отправка в 00:05 и 01:05 UTC.
 	go service.RunScheduler(ctx, sender, appLogger, cfg.Scheduler)
 
+	// 5a. Cleanup — очистка старых дней раз в сутки в 00:00 UTC.
+	go service.RunCleanup(ctx, tracker, appLogger)
+
 	// 6. HTTP-сервер.
 	mux := http.NewServeMux()
 	h := handlers.NewStatsHandler(sender, appLogger)

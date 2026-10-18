@@ -84,6 +84,7 @@ func (s *Sender) SendNow(ctx context.Context, date time.Time) error {
 
 // flush отправляет данные за указанную дату с ретраями.
 func (s *Sender) flush(ctx context.Context, date time.Time) error {
+	date = date.UTC()
 	day := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	deadline := time.Now().Add(s.maxDuration)
 

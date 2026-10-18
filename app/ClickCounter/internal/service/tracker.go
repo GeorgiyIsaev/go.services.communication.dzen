@@ -7,9 +7,7 @@ import (
 	"go.services.communication.dzen/app/ClickCounter/internal/domain"
 )
 
-// Tracker хранит клики по дням (только сегодня и вчера) и обеспечивает
-// потокобезопасный доступ. Считаем УНИКАЛЬНЫХ пользователей на пару
-// (день, автор). Один user_id, кликнувший 5 раз — это 1.
+// Tracker хранит клики по дням (только сегодня и вчера)
 type Tracker struct {
 	mu      sync.RWMutex
 	days    map[string]map[int64]map[int64]struct{}
@@ -36,16 +34,15 @@ func dayKey(t time.Time) string {
 
 // AddClick — добавить клик «сейчас».
 func (t *Tracker) AddClick(authorID, userID int64) {
-	t.AddClickAt(authorID, userID, time.Now())
+	t.AddClickAt(authorID, userID, time.Now().UTC()) // ← UTC
 }
 
 // AddClickAt добавляет клик на конкретный момент времени.
-// Игнорирует сообщения старше «вчера».
 func (t *Tracker) AddClickAt(authorID, userID int64, at time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	now := t.nowFunc()
+	now := t.nowFunc().UTC() // ← UTC до AddDate
 	today := dayKey(now)
 	yesterday := dayKey(now.AddDate(0, 0, -1))
 	msgDay := dayKey(at)
@@ -69,8 +66,18 @@ func (t *Tracker) AddClickAt(authorID, userID int64, at time.Time) {
 		dayData[authorID] = users
 	}
 	users[userID] = struct{}{}
+}
 
-	// Чистим всё старше вчера.
+// Cleanup удаляет все дни, кроме сегодняшнего и вчерашнего (UTC).
+// Вызывается раз в сутки в 00:00 UTC через RunCleanup.
+func (t *Tracker) Cleanup(now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now = now.UTC()
+	today := dayKey(now)
+	yesterday := dayKey(now.AddDate(0, 0, -1))
+
 	for d := range t.days {
 		if d != today && d != yesterday {
 			delete(t.days, d)

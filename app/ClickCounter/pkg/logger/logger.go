@@ -1,6 +1,3 @@
-// Package logger создаёт slog.Logger с JSON-выводом в stdout
-// и автоматическим добавлением request_id из context.Context.
-// Копия пакета из StorageGateway.
 package logger
 
 import (
