@@ -3,6 +3,32 @@ name: communication_services
 
 services:
 
+  click-dashboard:
+    build:
+      context: .
+      dockerfile: app/ClickDashboard/Dockerfile
+    container_name: click_dashboard
+    depends_on:
+      storage-gateway:
+        condition: service_healthy         # ждем healthy от storage-gateway
+    environment:
+      PORT_CLICK_DASHBOARD: 8085
+      STORAGE_GATEWAY_ADDR: storage-gateway:9084
+      STORAGE_GATEWAY_TIMEOUT: "10s"
+      MAX_DAYS: 30
+      REFRESH_INTERVAL: "5m"
+    ports:
+      - "8085:8085"
+    networks:
+      - kafka-net
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8085/healthz" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
   storage-gateway:
     build:
       context: .
@@ -26,7 +52,7 @@ services:
     networks:
       - kafka-net
     restart: unless-stopped
-    healthcheck:                                    
+    healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8084/healthz"]
       interval: 5s
       timeout: 3s

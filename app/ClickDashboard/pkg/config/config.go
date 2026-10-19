@@ -29,7 +29,7 @@ func Load() *Config {
 	cfg := &Config{
 		ServerPort: getEnv("PORT_CLICK_DASHBOARD", "8085"),
 
-		StorageGatewayAddr:    getEnv("STORAGE_GATEWAY_ADDR", "localhost:8084"),
+		StorageGatewayAddr:    getEnv("STORAGE_GATEWAY_ADDR", "localhost:9084"),
 		StorageGatewayTimeout: getEnvDuration("STORAGE_GATEWAY_TIMEOUT", 10*time.Second),
 
 		MaxDays:         getEnvMaxDays("MAX_DAYS", 30),

@@ -12,3 +12,9 @@ docker-compose down -v
 
 Для рестарта clickimitator внутри докер
 docker compose restart clickimitator
+
+
+# Пересобрать образ, так как берет его из кеша даже после очистки (если меняли код)
+docker compose up --build
+
+docker compose up -d --build storage-gateway # пересобрать конкретный сервис
