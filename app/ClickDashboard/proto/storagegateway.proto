@@ -1,0 +1,53 @@
+// Генерация (из корня репозитория):
+//
+//   protoc --go_out=. --go_opt=module=go.services.communication.dzen --go-grpc_out=. --go-grpc_opt=module=go.services.communication.dzen app/ClickDashboard/proto/storagegateway.proto
+
+// Требуются плагины: protoc-gen-go, protoc-gen-go-grpc.
+// Сгенерированный пакет: internal/pb (pb.NewStorageGatewayClient).
+
+syntax = "proto3";
+
+package storagegateway.v1;
+
+option go_package = "go.services.communication.dzen/app/ClickDashboard/pkg/pb;pb";
+
+service StorageGateway {
+  // Список авторов (справочник).
+  rpc GetAuthors(GetAuthorsRequest) returns (GetAuthorsResponse);
+
+  // Статистика кликов за диапазон дат включительно.
+  // Один unary-вызов — весь диапазон одним сообщением.
+  rpc GetStatsRange(GetStatsRangeRequest) returns (GetStatsRangeResponse);
+}
+
+message GetAuthorsRequest {}
+
+message Author {
+  int64  id         = 1;
+  string first_name = 2;
+  string last_name  = 3;
+  string email      = 4;
+}
+
+message GetAuthorsResponse {
+  repeated Author authors = 1;
+}
+
+message GetStatsRangeRequest {
+  string from_date = 1; // YYYY-MM-DD, включительно
+  string to_date   = 2; // YYYY-MM-DD, включительно
+}
+
+message AuthorStats {
+  int64 author_id = 1;
+  int64 count     = 2;
+}
+
+message DailyStats {
+  string date                 = 1; // YYYY-MM-DD
+  repeated AuthorStats stats  = 2;
+}
+
+message GetStatsRangeResponse {
+  repeated DailyStats days = 1;
+}

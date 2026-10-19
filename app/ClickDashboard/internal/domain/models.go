@@ -1,31 +1,17 @@
 package domain
 
-import "time"
-
-// Author — справочная информация об авторе (то, что отдаёт GET /authors StorageGateway).
+// Author — справочная информация об авторе.
 type Author struct {
-	ID        int64  `json:"id"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Email     string `json:"email"`
+	ID        int64
+	FirstName string
+	LastName  string
+	Email     string
 }
 
-// AuthorStats — статистика по одному автору за один день
-// (то, что отдаёт GET /dashboard StorageGateway).
+// AuthorStats — статистика по одному автору за один день.
 type AuthorStats struct {
-	AuthorID int64 `json:"author_id"`
-	Count    int64 `json:"count"`
-}
-
-// AuthorsResponse — обёртка ответа GET /authors.
-type AuthorsResponse struct {
-	Authors []Author `json:"authors"`
-}
-
-// DashboardResponse — обёртка ответа GET /dashboard.
-type DashboardResponse struct {
-	Date  time.Time     `json:"date"`
-	Stats []AuthorStats `json:"stats"`
+	AuthorID int64
+	Count    int64
 }
 
 // AuthorRow — строка таблицы для фронта: один автор и его клики по дням.
@@ -34,7 +20,7 @@ type AuthorRow struct {
 	FirstName string  `json:"first_name"`
 	LastName  string  `json:"last_name"`
 	Email     string  `json:"email"`
-	Clicks    []int64 `json:"clicks"` // выровнено по StatsMatrix.Dates
+	Clicks    []int64 `json:"clicks"`
 }
 
 // StatsMatrix — то, что ClickDashboard отдаёт фронту по GET /stats.

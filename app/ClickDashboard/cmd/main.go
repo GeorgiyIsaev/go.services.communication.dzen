@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,8 +20,6 @@ import (
 	"go.services.communication.dzen/app/ClickDashboard/pkg/middleware"
 )
 
-// indexHTML встраивается в бинарь.
-//
 //go:embed index.html
 var indexHTML []byte
 
@@ -39,11 +38,18 @@ func run(appLogger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// HTTP-клиент к StorageGateway.
-	sgClient := client.NewStorageGatewayClient(cfg.StorageGatewayURL, cfg.StorageGatewayTimeout)
+	// gRPC-клиент к StorageGateway.
+	sgClient, err := client.NewStorageGatewayClient(cfg.StorageGatewayAddr, cfg.StorageGatewayTimeout)
+	if err != nil {
+		return fmt.Errorf("storage gateway client: %w", err)
+	}
+	defer sgClient.Close()
 
-	// Сервис агрегации: лимит дней из конфига, семафор на 5 параллельных запросов.
-	svc := service.NewStatsService(sgClient, cfg.MaxDays, 5)
+	store := service.NewStore()
+	svc := service.NewStatsService(sgClient, store, appLogger, cfg.MaxDays, cfg.RefreshInterval)
+
+	// refresh-цикл для проекции
+	go svc.Run(ctx)
 
 	// Хендлеры.
 	h := handlers.NewStatsHandler(svc, appLogger)
@@ -51,13 +57,11 @@ func run(appLogger *slog.Logger) error {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	// Отдаём index.html по корню.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(indexHTML)
 	})
 
-	// Порядок middleware: RequestID (внешний) → Logging → Recover → mux.
 	var handler http.Handler = mux
 	handler = middleware.Recover(appLogger)(handler)
 	handler = middleware.Logging(appLogger)(handler)
@@ -76,8 +80,9 @@ func run(appLogger *slog.Logger) error {
 	go func() {
 		appLogger.Info("ClickDashboard started",
 			"port", cfg.ServerPort,
-			"storage_gateway_url", cfg.StorageGatewayURL,
-			"max_days", cfg.MaxDays)
+			"storage_gateway_addr", cfg.StorageGatewayAddr,
+			"max_days", cfg.MaxDays,
+			"refresh_interval", cfg.RefreshInterval.String())
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

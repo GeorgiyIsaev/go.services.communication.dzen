@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -12,54 +13,46 @@ import (
 	"go.services.communication.dzen/app/ClickDashboard/internal/domain"
 )
 
-// Ошибки сервиса. Хендлер ловит именно их, не зная о внутренностях клиента.
+// Ошибки сервиса.
 var (
-	ErrInvalidDays = errors.New("invalid days")
-	ErrUpstream    = errors.New("storage gateway request failed")
+	ErrInvalidDays      = errors.New("invalid days")
+	ErrSnapshotNotReady = errors.New("snapshot not ready")
 )
 
-// StorageGatewayClient — интерфейс
+// StorageGatewayClient — интерфейс (реализуется client.StorageGatewayClient).
 type StorageGatewayClient interface {
 	GetAuthors(ctx context.Context) ([]domain.Author, error)
-	GetStatsByDate(ctx context.Context, date time.Time) ([]domain.AuthorStats, error)
+	GetStatsRange(ctx context.Context, from, to time.Time) (map[string][]domain.AuthorStats, error)
 }
 
-// StatsService агрегирует данные из StorageGateway в матрицу "авторы × дни".
+// StatsService держит проекцию в памяти и периодически её обновляет.
 type StatsService struct {
-	client  StorageGatewayClient
-	maxDays int
-	// sem — семафор: ограничивает количество одновременных запросов к StorageGateway.
-	// Канал с буфером N: чтобы "войти", нужно положить токен; выходя — забрать.
-	sem chan struct{}
+	client          StorageGatewayClient
+	store           *Store
+	logger          *slog.Logger
+	maxDays         int
+	refreshInterval time.Duration
 }
 
-func NewStatsService(client StorageGatewayClient, maxDays, concurrency int) *StatsService {
-	if concurrency <= 0 {
-		concurrency = 5
-	}
+func NewStatsService(
+	client StorageGatewayClient,
+	store *Store,
+	logger *slog.Logger,
+	maxDays int,
+	refreshInterval time.Duration,
+) *StatsService {
 	return &StatsService{
-		client:  client,
-		maxDays: maxDays,
-		sem:     make(chan struct{}, concurrency),
+		client:          client,
+		store:           store,
+		logger:          logger,
+		maxDays:         maxDays,
+		refreshInterval: refreshInterval,
 	}
 }
 
-// MaxDays возвращает текущий лимит дней (из конфига).
-func (s *StatsService) MaxDays() int {
-	return s.maxDays
-}
+func (s *StatsService) MaxDays() int { return s.maxDays }
 
-// GetStats собирает матрицу кликов.
-//
-// Алгоритм:
-//  1. Проверяем, что days в допустимом диапазоне [1, maxDays].
-//  2. Формируем список дат: вчера, позавчера, ... (по убыванию).
-//  3. Параллельно запрашиваем:
-//     - список всех авторов (один запрос),
-//     - статистику по каждой дате (N запросов).
-//     Все запросы идут через семафор s.sem, не более N одновременно.
-//  4. Собираем матрицу: автор → {дата → клики}. Пустые дни остаются нулями.
-//  5. Формируем ответ в формате, удобном для фронта.
+// GetStats читает из памяти.
 func (s *StatsService) GetStats(ctx context.Context, days int) (*domain.StatsMatrix, error) {
 	if days < 1 {
 		return nil, fmt.Errorf("%w: must be >= 1, got %d", ErrInvalidDays, days)
@@ -68,18 +61,80 @@ func (s *StatsService) GetStats(ctx context.Context, days int) (*domain.StatsMat
 		return nil, fmt.Errorf("%w: must be <= %d, got %d", ErrInvalidDays, s.maxDays, days)
 	}
 
-	// Список дат: вчера и назад. Сегодня не берём — данные за сегодня ещё собираются.
-	yesterday := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)
-	dates := make([]time.Time, 0, days)
-	for i := 0; i < days; i++ {
-		dates = append(dates, yesterday.AddDate(0, 0, -i))
+	snap := s.store.Get()
+	if snap == nil {
+		return nil, ErrSnapshotNotReady
+	}
+	return snap.Slice(days), nil
+}
+
+// Run — блокирующий цикл фоновых обновлений.
+func (s *StatsService) Run(ctx context.Context) {
+	const (
+		startupRetries    = 6
+		startupRetryDelay = 10 * time.Second
+	)
+
+	refreshed := false
+	for i := 0; i < startupRetries; i++ {
+		rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := s.Refresh(rctx)
+		cancel()
+		if err == nil {
+			refreshed = true
+			break
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		s.logger.Warn("initial refresh failed",
+			"err", err, "attempt", i+1, "retry_in", startupRetryDelay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(startupRetryDelay):
+		}
+	}
+	if !refreshed {
+		s.logger.Error("initial refresh failed after retries; will keep retrying on ticker")
 	}
 
-	// errgroup: g.Wait() вернёт первую ошибку, остальные запросы отменятся через gCtx.
-	g, gCtx := errgroup.WithContext(ctx)
+	ticker := time.NewTicker(s.refreshInterval)
+	defer ticker.Stop()
 
-	// запрос авторов.
-	var authors []domain.Author
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rctx, cancel := context.WithTimeout(ctx, s.refreshInterval/2)
+			err := s.Refresh(rctx)
+			cancel()
+			if err != nil {
+				// Старый снапшот продолжаем отдавать: устаревшие данные
+				// лучше, чем 5xx на каждом /stats.
+				s.logger.Error("refresh failed", "err", err)
+			}
+		}
+	}
+}
+
+// Refresh тянет данные из StorageGateway и публикует новый снапшот.
+func (s *StatsService) Refresh(ctx context.Context) error {
+	start := time.Now()
+
+	// Диапазон: вчера и назад на maxDays-1. Сегодня не берём —
+	// данные за сегодня ещё собираются.
+	yesterday := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)
+	from := yesterday.AddDate(0, 0, -(s.maxDays - 1))
+	to := yesterday
+
+	var (
+		authors     []domain.Author
+		statsByDate map[string][]domain.AuthorStats
+	)
+
+	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		a, err := s.client.GetAuthors(gCtx)
 		if err != nil {
@@ -88,56 +143,60 @@ func (s *StatsService) GetStats(ctx context.Context, days int) (*domain.StatsMat
 		authors = a
 		return nil
 	})
-
-	// запросы статистики по дням.
-	statsByDate := make([][]domain.AuthorStats, len(dates))
-	for i, d := range dates {
-		i, d := i, d
-		g.Go(func() error {
-			// Заходим в семафор или отменяемся, если контекст уже отменён.
-			select {
-			case s.sem <- struct{}{}:
-				defer func() { <-s.sem }()
-			case <-gCtx.Done():
-				return gCtx.Err()
-			}
-
-			st, err := s.client.GetStatsByDate(gCtx, d)
-			if err != nil {
-				return fmt.Errorf("get stats %s: %w", d.Format("2006-01-02"), err)
-			}
-			statsByDate[i] = st
-			return nil
-		})
-	}
-
+	g.Go(func() error {
+		st, err := s.client.GetStatsRange(gCtx, from, to)
+		if err != nil {
+			return fmt.Errorf("get stats range: %w", err)
+		}
+		statsByDate = st
+		return nil
+	})
 	if err := g.Wait(); err != nil {
-		// Приводим ошибки клиента к ошибкам сервиса — наружу отдаём только ErrUpstream.
-		return nil, wrapUpstream(err)
+		return err
 	}
 
-	// Собираем матрицу кликов: map[authorID]map[dateStr]clicks.
+	snap := buildSnapshot(authors, statsByDate, from, to, s.maxDays)
+	s.store.Publish(snap)
+
+	s.logger.Info("snapshot refreshed",
+		"authors", len(snap.Authors),
+		"days", len(snap.Dates),
+		"max_days", snap.MaxDays,
+		"duration", time.Since(start),
+	)
+	return nil
+}
+
+// buildSnapshot собирает иммутабельный Snapshot из сырых данных.
+func buildSnapshot(
+	authors []domain.Author,
+	statsByDate map[string][]domain.AuthorStats,
+	from, to time.Time,
+	maxDays int,
+) *Snapshot {
+	// Даты по убыванию: to (вчера), to-1, ..., from.
+	dates := make([]string, 0, maxDays)
+	for d := to; !d.Before(from); d = d.AddDate(0, 0, -1) {
+		dates = append(dates, d.Format("2006-01-02"))
+	}
+
+	// Индекс: authorID → dateStr → clicks.
 	clicks := make(map[int64]map[string]int64, len(authors))
-	for i, st := range statsByDate {
-		dateStr := dates[i].Format("2006-01-02")
-		for _, s := range st {
-			if _, ok := clicks[s.AuthorID]; !ok {
-				clicks[s.AuthorID] = make(map[string]int64)
+	for dateStr, dayStats := range statsByDate {
+		for _, st := range dayStats {
+			m, ok := clicks[st.AuthorID]
+			if !ok {
+				m = make(map[string]int64)
+				clicks[st.AuthorID] = m
 			}
-			clicks[s.AuthorID][dateStr] = s.Count
+			m[dateStr] = st.Count
 		}
 	}
 
-	// Авторы в ответе — по возрастанию ID (стабильно и предсказуемо).
 	sort.Slice(authors, func(i, j int) bool { return authors[i].ID < authors[j].ID })
 
-	dateStrs := make([]string, len(dates))
-	for i, d := range dates {
-		dateStrs[i] = d.Format("2006-01-02")
-	}
-
-	rows := make([]domain.AuthorRow, 0, len(authors))
-	for _, a := range authors {
+	rows := make([]domain.AuthorRow, len(authors))
+	for i, a := range authors {
 		row := domain.AuthorRow{
 			ID:        a.ID,
 			FirstName: a.FirstName,
@@ -146,34 +205,17 @@ func (s *StatsService) GetStats(ctx context.Context, days int) (*domain.StatsMat
 			Clicks:    make([]int64, len(dates)),
 		}
 		if byDate, ok := clicks[a.ID]; ok {
-			for i, ds := range dateStrs {
-				row.Clicks[i] = byDate[ds] // нет записи → 0
+			for j, ds := range dates {
+				row.Clicks[j] = byDate[ds] // нет записи → 0
 			}
 		}
-		rows = append(rows, row)
+		rows[i] = row
 	}
 
-	return &domain.StatsMatrix{
-		Dates:   dateStrs,
+	return &Snapshot{
+		Dates:   dates,
 		Authors: rows,
-		MaxDays: s.maxDays,
-	}, nil
-}
-
-// wrapUpstream сворачивает ошибки клиента в ErrUpstream.
-// Сервис не раскрывает детали наружу — их видно только в логах.
-func wrapUpstream(err error) error {
-	if err == nil {
-		return nil
+		MaxDays: maxDays,
+		BuiltAt: time.Now(),
 	}
-	// Если это уже наша ошибка (ErrInvalidDays и т.п.) — не трогаем.
-	if errors.Is(err, ErrInvalidDays) {
-		return err
-	}
-	// Отмена контекста и таймауты — пробрасываем как есть,
-	// хендлер умеет их распознавать отдельно.
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return err
-	}
-	return fmt.Errorf("%w: %v", ErrUpstream, err)
 }

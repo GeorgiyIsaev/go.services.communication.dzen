@@ -13,7 +13,6 @@ import (
 	"go.services.communication.dzen/app/ClickDashboard/internal/service"
 )
 
-// StatsService — интерфейс
 type StatsService interface {
 	GetStats(ctx context.Context, days int) (*domain.StatsMatrix, error)
 	MaxDays() int
@@ -28,28 +27,23 @@ func NewStatsHandler(svc StatsService, logger *slog.Logger) *StatsHandler {
 	return &StatsHandler{svc: svc, logger: logger}
 }
 
-// RegisterRoutes регистрирует маршруты (Go 1.22+ method patterns).
 func (h *StatsHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /stats", h.GetStats)
 	mux.HandleFunc("GET /config", h.GetConfig)
 	mux.HandleFunc("GET /healthz", h.Health)
 }
 
-// GetConfig — отдаёт фронту лимиты (сейчас только max_days).
-// Фронт дёргает его при загрузке и выставляет max в input.
 func (h *StatsHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"max_days": h.svc.MaxDays(),
 	})
 }
 
-// Health — простой healthcheck.
 func (h *StatsHandler) Health(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
 }
 
-// GetStats обрабатывает GET /stats?days=N.
 func (h *StatsHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	days := min(5, h.svc.MaxDays())
 	if days < 1 {
@@ -73,32 +67,18 @@ func (h *StatsHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 		days = n
 	}
 
-	// Общий таймаут на весь запрос /stats, включая все параллельные вызовы StorageGateway.
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
 	start := time.Now()
-	result, err := h.svc.GetStats(ctx, days)
+	result, err := h.svc.GetStats(r.Context(), days)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidDays):
-			h.logger.WarnContext(r.Context(), "invalid days", "err", err)
 			writeError(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, context.DeadlineExceeded):
-			h.logger.ErrorContext(r.Context(), "request timed out",
-				"err", err, "days", days, "duration", time.Since(start))
-			writeError(w, http.StatusGatewayTimeout, "upstream timeout")
-		case errors.Is(err, service.ErrUpstream):
-			h.logger.ErrorContext(r.Context(), "upstream error",
-				"err", err, "days", days, "duration", time.Since(start))
-			writeError(w, http.StatusBadGateway, "storage gateway unavailable")
-		case errors.Is(err, context.Canceled):
-			h.logger.InfoContext(r.Context(), "request canceled by client",
-				"days", days, "duration", time.Since(start))
-			return
+		case errors.Is(err, service.ErrSnapshotNotReady):
+			h.logger.WarnContext(r.Context(), "snapshot not ready", "days", days)
+			writeError(w, http.StatusServiceUnavailable,
+				"data is loading, please retry in a few seconds")
 		default:
-			h.logger.ErrorContext(r.Context(), "internal error",
-				"err", err, "days", days)
+			h.logger.ErrorContext(r.Context(), "internal error", "err", err, "days", days)
 			writeError(w, http.StatusInternalServerError, "internal error")
 		}
 		return

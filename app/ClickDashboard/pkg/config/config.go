@@ -12,12 +12,13 @@ import (
 type Config struct {
 	ServerPort string
 
-	// StorageGateway.
-	StorageGatewayURL     string
-	StorageGatewayTimeout time.Duration
+	// StorageGateway (gRPC).
+	StorageGatewayAddr    string        // host:port, без схемы
+	StorageGatewayTimeout time.Duration // таймаут на один RPC
 
-	// Максимальное количество дней, которое можно запросить у /stats.
-	MaxDays int
+	// Лимит дней в проекции и период её обновления.
+	MaxDays         int
+	RefreshInterval time.Duration
 }
 
 func Load() *Config {
@@ -25,14 +26,21 @@ func Load() *Config {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	return &Config{
+	cfg := &Config{
 		ServerPort: getEnv("PORT_CLICK_DASHBOARD", "8085"),
 
-		StorageGatewayURL:     getEnv("STORAGE_GATEWAY_URL", "http://localhost:8084"),
+		StorageGatewayAddr:    getEnv("STORAGE_GATEWAY_ADDR", "localhost:8084"),
 		StorageGatewayTimeout: getEnvDuration("STORAGE_GATEWAY_TIMEOUT", 10*time.Second),
 
-		MaxDays: getEnvMaxDays("MAX_DAYS", 30),
+		MaxDays:         getEnvMaxDays("MAX_DAYS", 30),
+		RefreshInterval: getEnvDuration("REFRESH_INTERVAL", 5*time.Minute),
 	}
+
+	if cfg.RefreshInterval <= 0 {
+		log.Fatalf("config: REFRESH_INTERVAL must be > 0, got %s", cfg.RefreshInterval)
+	}
+
+	return cfg
 }
 
 func getEnv(key, fallback string) string {
