@@ -10,7 +10,10 @@ import (
 )
 
 type Config struct {
+	// HTTP порт (для ClickCounter)
 	ServerPort string
+	// gRPC порт (для ClickDashboard)
+	GRPCPort string
 
 	DBHost     string
 	DBPort     string
@@ -32,6 +35,7 @@ func Load() *Config {
 
 	return &Config{
 		ServerPort: getEnv("PORT_CLICK_STORAGE", "8084"),
+		GRPCPort:   getEnv("GRPC_PORT_CLICK_STORAGE", "9084"), // Новый порт
 
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "5432"),

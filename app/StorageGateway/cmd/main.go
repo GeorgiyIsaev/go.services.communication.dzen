@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"google.golang.org/grpc"
 
 	"go.services.communication.dzen/app/StorageGateway/internal/handlers"
 	"go.services.communication.dzen/app/StorageGateway/internal/repository"
@@ -17,6 +20,7 @@ import (
 	"go.services.communication.dzen/app/StorageGateway/pkg/db"
 	"go.services.communication.dzen/app/StorageGateway/pkg/logger"
 	"go.services.communication.dzen/app/StorageGateway/pkg/middleware"
+	"go.services.communication.dzen/app/StorageGateway/pkg/pb"
 )
 
 func main() {
@@ -42,10 +46,11 @@ func run(appLogger *slog.Logger) error {
 
 	repo := repository.NewPostgresRepository(database)
 	svc := service.NewStorageService(repo)
-	handler := handlers.NewStorageHandler(svc, appLogger)
 
+	// --- HTTP Сервер (для ClickCounter) ---
+	httpHandler := handlers.NewStorageHandler(svc, appLogger)
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
+	httpHandler.RegisterRoutes(mux)
 
 	var h http.Handler = mux
 	h = middleware.Recover(appLogger)(h)
@@ -61,10 +66,34 @@ func run(appLogger *slog.Logger) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
+
 	go func() {
-		appLogger.Info("StorageGateway started", "port", cfg.ServerPort)
+		appLogger.Info("StorageGateway HTTP started", "port", cfg.ServerPort)
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	// --- gRPC Сервер (для ClickDashboard) ---
+	grpcHandler := handlers.NewGRPCStorageHandler(svc)
+	grpcSrv := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(
+			middleware.GRPCRequestID(),
+			middleware.GRPCRecover(appLogger),
+			middleware.GRPCLogging(appLogger),
+		),
+	)
+	pb.RegisterStorageGatewayServer(grpcSrv, grpcHandler)
+
+	go func() {
+		lis, err := net.Listen("tcp", ":"+cfg.GRPCPort)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		appLogger.Info("StorageGateway gRPC started", "port", cfg.GRPCPort)
+		if err := grpcSrv.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			errCh <- err
 		}
 	}()
@@ -78,5 +107,21 @@ func run(appLogger *slog.Logger) error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+
+	// Останавливаем HTTP
+	err = srv.Shutdown(shutdownCtx)
+
+	// Останавливаем gRPC
+	stopped := make(chan struct{})
+	go func() {
+		grpcSrv.GracefulStop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-shutdownCtx.Done():
+		grpcSrv.Stop() // Форсированная остановка, если по таймауту не уложились
+	}
+
+	return err
 }

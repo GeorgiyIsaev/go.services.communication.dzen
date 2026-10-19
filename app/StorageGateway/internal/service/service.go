@@ -20,6 +20,7 @@ type StatsRepository interface {
 	UpsertStats(ctx context.Context, date time.Time, stats []domain.AuthorStats) error
 	GetStatsByDate(ctx context.Context, date time.Time) ([]domain.AuthorStats, error)
 	GetAuthors(ctx context.Context) ([]domain.Author, error)
+	GetStatsRange(ctx context.Context, from, to time.Time) (map[string][]domain.AuthorStats, error)
 }
 
 // StorageService — конкретная реализация бизнес-слоя.
@@ -85,4 +86,15 @@ func validateStats(stats []domain.AuthorStats) error {
 		}
 	}
 	return nil
+}
+
+func (s *StorageService) GetStatsRange(ctx context.Context, from, to time.Time) (map[string][]domain.AuthorStats, error) {
+	if from.IsZero() || to.IsZero() {
+		return nil, ErrInvalidDate
+	}
+	result, err := s.repo.GetStatsRange(ctx, from.UTC().Truncate(24*time.Hour), to.UTC().Truncate(24*time.Hour))
+	if err != nil {
+		return nil, fmt.Errorf("get stats range: %w", err)
+	}
+	return result, nil
 }

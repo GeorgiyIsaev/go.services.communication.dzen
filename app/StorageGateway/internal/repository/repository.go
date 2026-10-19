@@ -110,7 +110,6 @@ func (r *PostgresRepository) GetAuthors(ctx context.Context) ([]domain.Author, e
 // ensureAuthors гарантирует наличие всех author_id из stats в таблице authors.
 // Отсутствующие создаются с заглушками: first_name='unknown', last_name='unknown',
 // email=unknown_<id>@unknown.local
-// Работает в переданной транзакции — при ошибке откатится вместе с upsert'ом статистики
 func ensureAuthors(ctx context.Context, tx *sql.Tx, stats []domain.AuthorStats) error {
 	for _, s := range stats {
 		_, err := tx.ExecContext(ctx, `
@@ -134,4 +133,33 @@ func ensureAuthors(ctx context.Context, tx *sql.Tx, stats []domain.AuthorStats) 
 	}
 
 	return nil
+}
+
+// GetStatsRange возвращает статистику за диапазон дат включительно.
+// Возвращает map[dateStr][]domain.AuthorStats, где dateStr = "YYYY-MM-DD".
+func (r *PostgresRepository) GetStatsRange(ctx context.Context, from, to time.Time) (map[string][]domain.AuthorStats, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT date, author_id, clicks
+		FROM stats
+		WHERE date >= $1 AND date <= $2
+		ORDER BY date, author_id`, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("query stats range: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]domain.AuthorStats)
+	for rows.Next() {
+		var d time.Time
+		var s domain.AuthorStats
+		if err := rows.Scan(&d, &s.AuthorID, &s.Count); err != nil {
+			return nil, fmt.Errorf("scan stats range row: %w", err)
+		}
+		dateStr := d.Format("2006-01-02")
+		result[dateStr] = append(result[dateStr], s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate stats range rows: %w", err)
+	}
+	return result, nil
 }

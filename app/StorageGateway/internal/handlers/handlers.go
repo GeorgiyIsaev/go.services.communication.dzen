@@ -17,6 +17,7 @@ type StorageService interface {
 	SaveStats(ctx context.Context, stats []domain.AuthorStats, date time.Time) error
 	GetDashboardData(ctx context.Context, date time.Time) ([]domain.AuthorStats, error)
 	GetAuthors(ctx context.Context) ([]domain.Author, error)
+	GetStatsRange(ctx context.Context, from, to time.Time) (map[string][]domain.AuthorStats, error)
 }
 
 type StorageHandler struct {
