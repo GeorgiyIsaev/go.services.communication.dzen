@@ -1,0 +1,15 @@
+.git
+.gitignore
+.github
+.idea
+.vscode
+**/.env
+**/.env.*
+**/*.md
+**/*_test.go
+**/tmp
+**/bin
+**/*.exe
+docker-compose*.yml
+Dockerfile*
+README*

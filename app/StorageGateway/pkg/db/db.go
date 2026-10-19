@@ -34,8 +34,7 @@ func Connect(ctx context.Context, cfg *config.Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 
-	//TODO filepath.Join(filepath.Dir(os.Args[0]), "migrations") - если не срабоатет в докере (протестить позже)
-	if err := runMigrations(sqlDB, "file://app/StorageGateway/migrations"); err != nil {
+	if err := runMigrations(sqlDB, cfg.MigrationsPath); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
 	}

@@ -2,6 +2,30 @@
 name: communication_services
 
 services:
+  storage-gateway:
+    build:
+      context: .
+      dockerfile: app/StorageGateway/Dockerfile
+    container_name: storage_gateway
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db                          # <-- имя сервиса, НЕ localhost
+      DB_PORT: 5432                        # порт который открывается в докере, а не пробрасывается наружу
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      PORT_CLICK_STORAGE: 8084
+      GRPC_PORT_CLICK_STORAGE: 9084
+      MIGRATIONS_PATH: file:///app/migrations
+    ports:
+      - "8084:8084"    # HTTP
+      - "9084:9084"    # gRPC
+    networks:
+      - kafka-net
+    restart: unless-stopped
+
   kafka1:
     image: confluentinc/cp-kafka:latest
     container_name: kafka1
@@ -94,16 +118,21 @@ services:
     image: postgres:15-alpine
     container_name: click_analytics_db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: click_analytics
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     ports:
-      - "5434:5432"
+      - "${DB_HOST_PORT:-5434}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
       - kafka-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d click_analytics" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 networks:
   kafka-net:

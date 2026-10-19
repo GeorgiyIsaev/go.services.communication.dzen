@@ -26,6 +26,8 @@ type Config struct {
 	DBMaxIdleConns    int
 	DBConnMaxLifetime time.Duration
 	DBConnMaxIdleTime time.Duration
+
+	MigrationsPath string
 }
 
 func Load() *Config {
@@ -47,6 +49,8 @@ func Load() *Config {
 		DBMaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 25),
 		DBConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
 		DBConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 5*time.Minute),
+
+		MigrationsPath: getEnv("MIGRATIONS_PATH", "file://app/StorageGateway/migrations"),
 	}
 }
 
