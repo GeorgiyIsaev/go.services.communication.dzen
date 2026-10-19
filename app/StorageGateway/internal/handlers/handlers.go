@@ -47,6 +47,12 @@ func (h *StorageHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /stats", h.SaveStats)
 	mux.HandleFunc("GET /dashboard", h.GetDashboardData)
 	mux.HandleFunc("GET /authors", h.GetAuthors)
+	mux.HandleFunc("GET /healthz", h.Health)
+}
+
+func (h *StorageHandler) Health(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
 }
 
 // POST /stats — принимает статистику от ClickCounter.

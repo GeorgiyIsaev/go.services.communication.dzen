@@ -2,6 +2,7 @@
 name: communication_services
 
 services:
+
   storage-gateway:
     build:
       context: .
@@ -25,6 +26,12 @@ services:
     networks:
       - kafka-net
     restart: unless-stopped
+    healthcheck:                                    
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   kafka1:
     image: confluentinc/cp-kafka:latest
