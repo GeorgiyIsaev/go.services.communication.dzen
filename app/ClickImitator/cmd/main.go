@@ -32,10 +32,6 @@ func run(cfg *config.Config, appLogger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := client.EnsureTopic(ctx, cfg.Kafka, appLogger); err != nil {
-		return err
-	}
-
 	sender, err := client.NewKafkaClickSender(cfg.Kafka.Brokers, cfg.Kafka.Topic)
 	if err != nil {
 		return err

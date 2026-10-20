@@ -3,6 +3,41 @@ name: communication_services
 
 services:
 
+  click-imitator:
+    build:
+      context: .
+      dockerfile: app/ClickImitator/Dockerfile
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully #ждем создание топика в кафке
+    environment:
+      KAFKA_BROKERS: "kafka1:19092,kafka2:19093,kafka3:19094"
+      KAFKA_TOPIC: clicks
+      KAFKA_PARTITIONS: 8
+      KAFKA_REPLICATION_FACTOR: 3
+      KAFKA_RETENTION: 48h
+      KAFKA_SEGMENT: 24h
+      # Режим по умолчанию — random (дефолт и в коде тоже)
+      GENERATOR_MODE: random
+      # Random-параметры (дефолты можно переопределять при запуске)
+      AUTHOR_ID_START: 1
+      AUTHOR_ID_END: 20
+      READER_ID_START: 1
+      READER_ID_END: 100
+      MIN_READS: 5
+      MAX_READS: 20
+      DELAY_BETWEEN_READS_SEC: 0
+      # Scenario-параметры
+      SCENARIO_DIR: /app/scenarios
+      # Sender
+      MAX_RETRIES: 5
+      SEND_TIMEOUT: 5s
+      LOG_LEVEL: info
+    networks:
+      - kafka-net
+    profiles:
+      - tools      # Запускается явно: `docker compose run --rm click-imitator`
+
   click-counter:
     build:
       context: .
@@ -11,24 +46,14 @@ services:
     depends_on:
       storage-gateway:
         condition: service_healthy       # ждём HTTP /healthz
-      kafka1:
-        condition: service_healthy       # ждём, пока Kafka принимает запросы
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully # ждем создание топика в кафке
     environment:
       PORT_CLICK_COUNTER: 8080
-
-      # INTERNAL-порты kafka (19092/19093/19094), НЕ внешние 9092/9093/9094!
-      # Изнутри docker-сети клиент должен идти на INTERNAL listener.
-      KAFKA_BROKERS: "kafka1:19092,kafka2:19093,kafka3:19094"
+      KAFKA_BROKERS: "kafka1:19092,kafka2:19093,kafka3:19094"   # INTERNAL-порты kafka (19092/19093/19094), НЕ внешние 9092/9093/9094!
       KAFKA_TOPIC: clicks
-
-      # HTTP (не gRPC!) к StorageGateway — порт 8084, не 9084
-      STORAGE_GATEWAY_URL: http://storage-gateway:8084
+      STORAGE_GATEWAY_URL: http://storage-gateway:8084 # HTTP
       STORAGE_GATEWAY_TIMEOUT: "10s"
-
       MAX_RETRIES: 5
       RETRY_DELAY: "1m"
       LONG_RETRY_DELAY: "30m"
@@ -214,6 +239,36 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
+
+  kafka-init:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka_init
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        echo ">>> Creating topic clicks (idempotent)..."
+        kafka-topics --bootstrap-server kafka1:19092,kafka2:19093,kafka3:19094 \
+          --create --if-not-exists \
+          --topic clicks \
+          --partitions 8 \
+          --replication-factor 3 \
+          --config retention.ms=172800000 \
+          --config segment.ms=86400000
+        echo ">>> Topic state:"
+        kafka-topics --bootstrap-server kafka1:19092 \
+          --describe --topic clicks
+    networks:
+      - kafka-net
+    restart: "no"
+
 
   db:
     image: postgres:15-alpine
