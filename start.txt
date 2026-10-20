@@ -1,27 +1,95 @@
-# Первый запуск (создаются тома)
-docker-compose up -d
+# # # # # Команды для докера в powershell
+# 0. Очистка Контейнера
+clear                                                   # очистить консоль или Ctrl + L
+docker-compose down                                     # остановить докер
+docker-compose down -v                                  # Остановить + удалить volume'ы (данные)
+docker compose down -v --rmi local                      # снести volume'ы + удалить собранные образы
 
-# Остановка контейнеров (тома остаются)
-docker-compose down
+# 1. Запуск контейнера
+docker-compose up -d                                    # запуск без логов образ из кеша
+docker compose up --build                               # Собрать занова игнорируя кеш (если изменены файлы проекта)
+docker compose up --build -d                            # Пересобрать без логов (-d)
+docker compose up -d --build storage-gateway            # только storage
+docker compose up -d --build click-counter              # только counter
 
-# Повторный запуск – данные сохраняются
-docker-compose up -d
+# 2. Ручная проверка что сервисы работаю
+curl.exe http://localhost:8085/healthz                  # ClickDashboard живой
+curl.exe http://localhost:8084/healthz                  # StorageGateway живой
+curl.exe http://localhost:8080/healthz                  # ClickCounter живой
 
-# Удалить тома вместе с контейнерами (очистить данные)
-docker-compose down -v
+# 3.1 Ручки StorageGateway (HTTP :8084)
+curl.exe http://localhost:8084/authors
+curl.exe "http://localhost:8084/dashboard?date=2026-10-20"
+curl.exe "http://localhost:8084/dashboard?date=$(Get-Date -Format yyyy-MM-dd)"
 
-Для рестарта clickimitator внутри докер
-docker compose restart clickimitator
+# 3.2 Ручки ClickDashboard (HTTP :8085)
+curl.exe http://localhost:8085/healthz
+curl.exe "http://localhost:8085/stats?days=3"
+curl.exe http://localhost:8085/config
+Start-Process http://localhost:8085/                     # открыть в браузере
+
+# 3.3 Ручки ClickCounter (:8080)
+curl.exe -X POST "http://localhost:8080/flush?date=2026-10-20"
+curl.exe -X POST "http://localhost:8080/flush?date=$(Get-Date -Format yyyy-MM-dd)"
+
+# 3.4 Kafka UI
+docker exec kafka1 kafka-topics --bootstrap-server kafka1:19092 --describe --topic clicks           # проверка что топик создан
+Start-Process http://localhost:8182                       # открыть в браузере
 
 
-# Пересобрать образ, так как берет его из кеша даже после очистки (если меняли код)
-docker compose up --build
-docker compose up --build -d    - юез лога контейнеров
+# 4 Чтение логов сервисов
+docker compose logs                                                     # Все сервисы (без -f — выведет накопленное и вернётся)
+docker compose logs -f click_counter                                    # В реальном времени, только один сервис
+docker compose logs -f click_counter storage-gateway                    # Несколько сервисов
+docker compose logs --tail=100 click_counter                            # Последние N строк
+docker compose logs click_counter | Select-String "stats sent|no data"  # Логи + grep
+docker logs storage_gateway | Select-String "grpc request"              # Логи gRPC-запросов в storage_gateway
 
 
-docker compose up -d --build storage-gateway # пересобрать конкретный сервис
+# 5.1 Запуску ClickImitator с конфигами по умолчанию
+docker compose run --rm click-imitator
+
+# 5.2 Запуску ClickImitator рандомная стратегия с параметрами
+#Запуска рандом и сценария
+docker compose run --rm `
+  -e AUTHOR_ID_START=1 `
+  -e AUTHOR_ID_END=100 `
+  -e READER_ID_START=1 `
+  -e READER_ID_END=1000 `
+  -e MIN_READS=5 `
+  -e MAX_READS=20 `
+  -e DELAY_BETWEEN_READS_SEC=1 `
+  click-imitator
+
+# 5.4 Запуску ClickImitator стратегия со сценарием
+docker compose run --rm `
+  -e GENERATOR_MODE=scenario `
+  -e DELAY_BETWEEN_READS_SEC=1 `
+  click-imitator
 
 
-clear  - очистить консоль
+# # # # # # # # # # # # # # # # # # # # # #
+# ===== Полный E2E: от имитатора до дашборда =====
 
-docker compose logs -f click_counter только лог каунтера
+# 1. Имитация кликов (с параметрами из compose, ~100 читателей)
+docker compose up -d
+docker compose run --rm click-imitator
+
+# 2. Проверить, что клики в Kafka
+docker exec kafka1 kafka-console-consumer `
+  --bootstrap-server kafka1:19092 `
+  --topic clicks --from-beginning --max-messages 3
+
+# 3. Отправить накопленное в БД за СЕГОДНЯ
+curl.exe -X POST "http://localhost:8080/flush?date=$(Get-Date -Format yyyy-MM-dd)"
+curl.exe -X POST "http://localhost:8080/flush?date=2026-10-20"
+
+# 4. Проверить через API
+curl.exe "http://localhost:8084/dashboard?date=$(Get-Date -Format yyyy-MM-dd)"
+
+# 5. Проверить в БД напрямую
+docker exec click_analytics_db psql -U postgres -d click_analytics `
+  -c "SELECT author_id, date, clicks FROM stats ORDER BY date DESC LIMIT 5;"
+
+# 6. Открыть дашборд
+Start-Process http://localhost:8085/

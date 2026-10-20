@@ -21,12 +21,12 @@ services:
       GENERATOR_MODE: random
       # Random-параметры (дефолты можно переопределять при запуске)
       AUTHOR_ID_START: 1
-      AUTHOR_ID_END: 20
+      AUTHOR_ID_END: 100
       READER_ID_START: 1
       READER_ID_END: 100
       MIN_READS: 5
       MAX_READS: 20
-      DELAY_BETWEEN_READS_SEC: 0
+      DELAY_BETWEEN_READS_SEC: 2
       # Scenario-параметры
       SCENARIO_DIR: /app/scenarios
       # Sender
