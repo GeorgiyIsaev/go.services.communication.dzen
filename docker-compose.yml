@@ -3,6 +3,50 @@ name: communication_services
 
 services:
 
+  click-counter:
+    build:
+      context: .
+      dockerfile: app/ClickCounter/Dockerfile
+    container_name: click_counter
+    depends_on:
+      storage-gateway:
+        condition: service_healthy       # ждём HTTP /healthz
+      kafka1:
+        condition: service_healthy       # ждём, пока Kafka принимает запросы
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    environment:
+      PORT_CLICK_COUNTER: 8080
+
+      # INTERNAL-порты kafka (19092/19093/19094), НЕ внешние 9092/9093/9094!
+      # Изнутри docker-сети клиент должен идти на INTERNAL listener.
+      KAFKA_BROKERS: "kafka1:19092,kafka2:19093,kafka3:19094"
+      KAFKA_TOPIC: clicks
+
+      # HTTP (не gRPC!) к StorageGateway — порт 8084, не 9084
+      STORAGE_GATEWAY_URL: http://storage-gateway:8084
+      STORAGE_GATEWAY_TIMEOUT: "10s"
+
+      MAX_RETRIES: 5
+      RETRY_DELAY: "1m"
+      LONG_RETRY_DELAY: "30m"
+      MAX_FLUSH_DURATION: "2h"
+      SCHEDULER_HOURS: "0,1"
+      SCHEDULER_MINUTE: 5
+    ports:
+      - "8080:8080"
+    networks:
+      - kafka-net
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/healthz" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
   click-dashboard:
     build:
       context: .
@@ -82,6 +126,12 @@ services:
       - kafka-net
     volumes:
       - kafka1_data:/var/lib/kafka/data
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1 || exit 1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   kafka2:
     image: confluentinc/cp-kafka:latest
@@ -106,6 +156,12 @@ services:
       - kafka-net
     volumes:
       - kafka2_data:/var/lib/kafka/data
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9093 > /dev/null 2>&1 || exit 1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   kafka3:
     image: confluentinc/cp-kafka:latest
@@ -130,6 +186,12 @@ services:
       - kafka-net
     volumes:
       - kafka3_data:/var/lib/kafka/data
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9094 > /dev/null 2>&1 || exit 1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   # Опционально: веб-интерфейс для Kafka
   kafka-ui:
@@ -146,6 +208,12 @@ services:
       - kafka3
     networks:
       - kafka-net
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9093 > /dev/null 2>&1 || exit 1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   db:
     image: postgres:15-alpine
