@@ -6,14 +6,84 @@
     <title>Аналитика кликов</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
-        h1 { color: #333; }
-        .controls { margin-bottom: 20px; }
+        h1 { color: #333; margin: 0; }
+
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        .utc-clock {
+            font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+            background: #f4f4f4;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 13px;
+            color: #333;
+            white-space: nowrap;
+        }
+        .utc-clock .label { color: #888; margin-right: 6px; }
+
+        .controls { margin-bottom: 12px; }
         .controls label { margin-right: 10px; }
         .controls input { width: 80px; margin-right: 10px; }
         .controls .hint { color: #888; margin-left: 10px; font-size: 13px; }
-        table { border-collapse: collapse; margin-top: 20px; }
+
+        .info-banner {
+            background: #eef4ff;
+            border: 1px solid #c9dcff;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin: 0 0 16px 0;
+            font-size: 13px;
+            color: #2a4a8a;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            line-height: 1.45;
+        }
+        .info-banner .ico { font-size: 15px; line-height: 1.2; }
+
+        table { border-collapse: collapse; margin-top: 4px; }
         th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: center; }
         th { background-color: #f4f4f4; }
+
+        /* «вчера» — основной свежий столбец */
+        th.yesterday-col { background-color: #fff0c8; }
+        td.yesterday-col { background-color: #fffaf0; }
+        .yesterday-label {
+            display: block;
+            font-size: 11px;
+            color: #a06000;
+            font-weight: normal;
+            margin-top: 2px;
+        }
+
+        /* «сегодня» — выколотая: полосы + приглушённый текст */
+        th.today-col {
+            background: repeating-linear-gradient(
+                    45deg, #f0f0f0, #f0f0f0 6px,
+                    #e6e6e6 6px, #e6e6e6 12px
+            );
+            color: #8a8a8a;
+            font-weight: normal;
+        }
+        td.today-col {
+            background: #fafafa;
+            color: #a0a0a0;
+        }
+        .today-label {
+            display: block;
+            font-size: 11px;
+            color: #999;
+            font-weight: normal;
+            margin-top: 2px;
+        }
+
         .author-col { text-align: left; }
         .no-data { color: #999; margin-top: 20px; }
         .error { color: #b00; margin-top: 12px; }
@@ -21,13 +91,29 @@
     </style>
 </head>
 <body>
-<h1>Аналитика кликов</h1>
+
+<div class="top-bar">
+    <h1>Аналитика кликов</h1>
+    <div class="utc-clock" title="Эталонное время — UTC. Локальное время может отличаться.">
+        <span class="label">UTC:</span><span id="utcClock">—</span>
+    </div>
+</div>
+
 <div class="controls">
     <label for="daysInput">Количество дней:</label>
     <input type="number" id="daysInput" value="5" min="1">
     <button id="refreshBtn">Обновить данные</button>
     <span class="hint" id="limitHint"></span>
 </div>
+
+<div class="info-banner">
+    <span class="ico">ℹ️</span>
+    <span>
+        Данные обновляются раз в сутки, около <strong>00:05 UTC</strong>.
+        Актуальные цифры — в колонке <strong>«вчера»</strong>.
+    </span>
+</div>
+
 <div id="tableContainer"></div>
 <div id="errorMsg" class="error"></div>
 <div id="warnMsg" class="warn"></div>
@@ -46,8 +132,35 @@
     const warnMsg = document.getElementById('warnMsg');
     const tableContainer = document.getElementById('tableContainer');
     const limitHint = document.getElementById('limitHint');
+    const utcClockEl = document.getElementById('utcClock');
 
-    // Подтягиваем лимит с бэкенда. Если не получилось — оставляем значение по умолчанию.
+    // --- UTC-часы и вычисление «сегодня/вчера» по UTC ---
+
+    function pad(n) { return String(n).padStart(2, '0'); }
+
+    function utcNow() {
+        const d = new Date();
+        return {
+            dateStr: `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+            timeStr: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`,
+        };
+    }
+
+    function utcYesterdayStr() {
+        const d = new Date();
+        d.setUTCDate(d.getUTCDate() - 1);
+        return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    }
+
+    function tickUtcClock() {
+        const { dateStr, timeStr } = utcNow();
+        utcClockEl.textContent = `${dateStr} ${timeStr}`;
+    }
+    setInterval(tickUtcClock, 1000);
+    tickUtcClock();
+
+    // --- Конфиг ---
+
     async function loadConfig() {
         try {
             const r = await fetch(`${API_BASE}/config`);
@@ -62,6 +175,8 @@
         limitHint.textContent = `(максимум: ${maxDays})`;
     }
 
+    // --- Данные ---
+
     async function loadStats() {
         errorMsg.textContent = '';
         warnMsg.textContent = '';
@@ -72,7 +187,6 @@
             return;
         }
 
-        // Мягко предупреждаем и подрезаем до лимита — чтобы не гонять 400-ку.
         if (days > maxDays) {
             warnMsg.textContent = `Максимум ${maxDays} дней. Показываем за ${maxDays}.`;
             days = maxDays;
@@ -82,12 +196,11 @@
         try {
             const r = await fetch(`${API_BASE}/stats?days=${encodeURIComponent(days)}`);
             if (!r.ok) {
-                // Ожидаем формат {"error": "..."}
                 let msg = `Ошибка ${r.status}`;
                 try {
                     const body = await r.json();
                     if (body && body.error) msg = body.error;
-                } catch (_) { /* ignore */ }
+                } catch (_) {}
                 throw new Error(msg);
             }
             const data = await r.json();
@@ -104,20 +217,41 @@
             return;
         }
 
+        const todayStr = utcNow().dateStr;
+        const yesterdayStr = utcYesterdayStr();
+
+        function thFor(date) {
+            if (date === todayStr) {
+                return `<th class="today-col">${date}<span class="today-label">сегодня</span></th>`;
+            }
+            if (date === yesterdayStr) {
+                return `<th class="yesterday-col">${date}<span class="yesterday-label">вчера</span></th>`;
+            }
+            return `<th>${date}</th>`;
+        }
+
         let html = '<table>';
         html += '<thead><tr><th class="author-col">Автор</th>';
-        data.dates.forEach(date => { html += `<th>${date}</th>`; });
+        data.dates.forEach(date => { html += thFor(date); });
         html += '</tr></thead><tbody>';
 
         data.authors.forEach(a => {
-            // Красивое имя: если first/last — "unknown", показываем ID.
             let name = `${a.first_name} ${a.last_name}`.trim();
             if (!name || name.toLowerCase() === 'unknown unknown') {
                 name = `Автор #${a.id}`;
             }
             html += '<tr>';
             html += `<td class="author-col" title="${a.email}">${name}</td>`;
-            a.clicks.forEach(c => { html += `<td>${c}</td>`; });
+            a.clicks.forEach((c, idx) => {
+                const date = data.dates[idx];
+                if (date === todayStr) {
+                    html += `<td class="today-col">${c}</td>`;
+                } else if (date === yesterdayStr) {
+                    html += `<td class="yesterday-col">${c}</td>`;
+                } else {
+                    html += `<td>${c}</td>`;
+                }
+            });
             html += '</tr>';
         });
         html += '</tbody></table>';

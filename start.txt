@@ -11,6 +11,7 @@ docker compose up --build                               # Собрать зан�
 docker compose up --build -d                            # Пересобрать без логов (-d)
 docker compose up -d --build storage-gateway            # только storage
 docker compose up -d --build click-counter              # только counter
+docker compose up -d --build click-dashboard            # только dashboard
 
 # 2. Ручная проверка что сервисы работаю
 curl.exe http://localhost:8085/healthz                  # ClickDashboard живой

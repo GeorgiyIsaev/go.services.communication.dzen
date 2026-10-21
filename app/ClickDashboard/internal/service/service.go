@@ -123,11 +123,9 @@ func (s *StatsService) Run(ctx context.Context) {
 func (s *StatsService) Refresh(ctx context.Context) error {
 	start := time.Now()
 
-	// Диапазон: вчера и назад на maxDays-1. Сегодня не берём —
-	// данные за сегодня ещё собираются.
-	yesterday := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)
-	from := yesterday.AddDate(0, 0, -(s.maxDays - 1))
-	to := yesterday
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	from := today.AddDate(0, 0, -(s.maxDays - 1))
+	to := today
 
 	var (
 		authors     []domain.Author
