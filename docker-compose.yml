@@ -85,7 +85,7 @@ services:
       STORAGE_GATEWAY_ADDR: storage-gateway:9084
       STORAGE_GATEWAY_TIMEOUT: "10s"
       MAX_DAYS: 30
-      REFRESH_INTERVAL: "5m"
+      REFRESH_INTERVAL: "30s"  # Для прода "5m" или даже 30м (обновление проекции)
     ports:
       - "8085:8085"
     networks:
@@ -227,6 +227,7 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: 'kafka1:19092,kafka2:19093,kafka3:19094'
+      DYNAMIC_CONFIG_ENABLED: "true"
     depends_on:
       - kafka1
       - kafka2
@@ -234,11 +235,11 @@ services:
     networks:
       - kafka-net
     healthcheck:
-      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9093 > /dev/null 2>&1 || exit 1" ]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1" ]
       interval: 10s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   kafka-init:
     image: confluentinc/cp-kafka:latest

@@ -30,8 +30,10 @@ curl.exe http://localhost:8085/config
 Start-Process http://localhost:8085/                     # открыть в браузере
 
 # 3.3 Ручки ClickCounter (:8080)
-curl.exe -X POST "http://localhost:8080/flush?date=2026-10-20"
-curl.exe -X POST "http://localhost:8080/flush?date=$(Get-Date -Format yyyy-MM-dd)"
+curl.exe -X POST "http://localhost:8080//flush/today"    # толкнуть сервис и отправит данны в бд за сегдня
+curl.exe -X POST "http://localhost:8080//flush/yesterday"
+curl.exe -s http://localhost:8080/stats/today  # получить данные за сегодня json
+curl.exe -s http://localhost:8080/stats/yesterday
 
 # 3.4 Kafka UI
 docker exec kafka1 kafka-topics --bootstrap-server kafka1:19092 --describe --topic clicks           # проверка что топик создан
@@ -56,7 +58,7 @@ docker compose run --rm `
   -e AUTHOR_ID_START=1 `
   -e AUTHOR_ID_END=100 `
   -e READER_ID_START=1 `
-  -e READER_ID_END=1000 `
+  -e READER_ID_END=100 `
   -e MIN_READS=5 `
   -e MAX_READS=20 `
   -e DELAY_BETWEEN_READS_SEC=1 `
@@ -82,8 +84,9 @@ docker exec kafka1 kafka-console-consumer `
   --topic clicks --from-beginning --max-messages 3
 
 # 3. Отправить накопленное в БД за СЕГОДНЯ
-curl.exe -X POST "http://localhost:8080/flush?date=$(Get-Date -Format yyyy-MM-dd)"
-curl.exe -X POST "http://localhost:8080/flush?date=2026-10-20"
+curl.exe -X POST "http://localhost:8080/flush/today"
+curl.exe -X POST "http://localhost:8080/flush/yesterday"
+curl.exe "http://localhost:8080//stats/today" # посмотреть содержимое
 
 # 4. Проверить через API
 curl.exe "http://localhost:8084/dashboard?date=$(Get-Date -Format yyyy-MM-dd)"

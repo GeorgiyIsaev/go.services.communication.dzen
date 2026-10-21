@@ -35,13 +35,13 @@ func RunScheduler(ctx context.Context, sender *Sender, logger *slog.Logger, cfg 
 	}
 }
 
-// RunCleanup раз в сутки в 00:00 UTC чистит Tracker от устаревших дней.
+// RunCleanup раз в сутки в 00:06 UTC чистит Tracker от устаревших дней.
 func RunCleanup(ctx context.Context, tracker *Tracker, logger *slog.Logger) {
 	logger.Info("cleanup started")
 
 	for {
 		now := time.Now().UTC()
-		next := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+		next := time.Date(now.Year(), now.Month(), now.Day(), 0, 6, 0, 0, time.UTC).AddDate(0, 0, 1)
 		wait := next.Sub(now)
 
 		logger.Info("cleanup: next run scheduled",

@@ -61,7 +61,7 @@ func run(appLogger *slog.Logger) error {
 
 	// 6. HTTP-сервер.
 	mux := http.NewServeMux()
-	h := handlers.NewStatsHandler(sender, appLogger)
+	h := handlers.NewStatsHandler(sender, tracker, appLogger)
 	h.RegisterRoutes(mux)
 
 	var handler http.Handler = mux
