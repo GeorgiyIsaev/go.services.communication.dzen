@@ -58,7 +58,7 @@ docker compose run --rm `
   -e AUTHOR_ID_START=1 `
   -e AUTHOR_ID_END=100 `
   -e READER_ID_START=1 `
-  -e READER_ID_END=100 `
+  -e READER_ID_END=1000 `
   -e MIN_READS=5 `
   -e MAX_READS=20 `
   -e DELAY_BETWEEN_READS_SEC=1 `

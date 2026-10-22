@@ -53,7 +53,7 @@ func NewSender(tracker *Tracker, client StorageGatewayClient, logger *slog.Logge
 	}
 }
 
-// SendAsync запускает отправку в фоне и сразу возвращается.
+// SendAsync запускает отправку в фоне и сразу возвращается
 func (s *Sender) SendAsync(date time.Time) {
 	//(защита от параллельных запусков).
 	if !s.sending.CompareAndSwap(false, true) {
@@ -73,7 +73,7 @@ func (s *Sender) SendAsync(date time.Time) {
 	}()
 }
 
-// SendNow — синхронная отправка. Используется ручкой /flush.
+// SendNow — синхронная отправка. Используется ручкой /flush
 func (s *Sender) SendNow(ctx context.Context, date time.Time) error {
 	if !s.sending.CompareAndSwap(false, true) {
 		return errors.New("send already in progress")
@@ -82,7 +82,7 @@ func (s *Sender) SendNow(ctx context.Context, date time.Time) error {
 	return s.flush(ctx, date)
 }
 
-// flush отправляет данные за указанную дату с ретраями.
+// flush отправляет данные за указанную дату с ретраями
 func (s *Sender) flush(ctx context.Context, date time.Time) error {
 	date = date.UTC()
 	day := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
@@ -129,7 +129,7 @@ func (s *Sender) flush(ctx context.Context, date time.Time) error {
 	}
 }
 
-// Shutdown отменяет фоновые отправки и ждёт их завершения.
+// Shutdown отменяет фоновые отправки и ждёт их завершения
 func (s *Sender) Shutdown() {
 	s.cancel()
 	s.wg.Wait()

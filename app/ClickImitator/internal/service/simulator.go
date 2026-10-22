@@ -43,9 +43,7 @@ func (s *Simulator) Run(ctx context.Context) error {
 
 	err := s.strategy.Run(ctx, s.sender, s.cfg)
 
-	// Отмена контекста — это graceful shutdown, а не ошибка.
-	// Проверяем раньше err != nil: если сигнал пришёл, exit code должен быть 0,
-	// даже если стратегия успела вернуть агрегированную ошибку.
+	// Отмена контекста
 	if ctx.Err() != nil {
 		s.logger.Info("simulation interrupted")
 		return nil

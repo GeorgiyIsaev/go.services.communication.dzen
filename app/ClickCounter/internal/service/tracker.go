@@ -34,7 +34,7 @@ func dayKey(t time.Time) string {
 
 // AddClick — добавить клик «сейчас».
 func (t *Tracker) AddClick(authorID, userID int64) {
-	t.AddClickAt(authorID, userID, time.Now().UTC()) // ← UTC
+	t.AddClickAt(authorID, userID, time.Now().UTC())
 }
 
 // AddClickAt добавляет клик на конкретный момент времени.
@@ -42,7 +42,7 @@ func (t *Tracker) AddClickAt(authorID, userID int64, at time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	now := t.nowFunc().UTC() // ← UTC до AddDate
+	now := t.nowFunc().UTC()
 	today := dayKey(now)
 	yesterday := dayKey(now.AddDate(0, 0, -1))
 	msgDay := dayKey(at)
@@ -69,7 +69,6 @@ func (t *Tracker) AddClickAt(authorID, userID int64, at time.Time) {
 }
 
 // Cleanup удаляет все дни, кроме сегодняшнего и вчерашнего (UTC).
-// Вызывается раз в сутки в 00:00 UTC через RunCleanup.
 func (t *Tracker) Cleanup(now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

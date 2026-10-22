@@ -12,7 +12,6 @@ import (
 	"go.services.communication.dzen/app/ClickImitator/internal/domain"
 )
 
-// KafkaClickSender реализует domain.ClickSender через Kafka.
 type KafkaClickSender struct {
 	writer *kafka.Writer
 }

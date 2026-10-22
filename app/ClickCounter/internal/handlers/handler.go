@@ -40,26 +40,24 @@ func (h *StatsHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", h.Health)
 }
 
-// utcYesterday возвращает дату «вчера» по UTC (полночь).
+// utcYesterday возвращает дату «вчера» по UTC (полночь)
 func utcYesterday() time.Time {
 	return time.Now().UTC().AddDate(0, 0, -1)
 }
 
-// utcToday возвращает дату «сегодня» по UTC (полночь).
+// utcToday возвращает дату «сегодня» по UTC (полночь)
 func utcToday() time.Time {
 	return time.Now().UTC()
 }
 
 // --- Flush ---
 
-// FlushYesterday отправляет в StorageGateway накопленные данные за вчера (UTC).
-// Синхронный: 200 = отправлено, 500 = ошибка. Используется для ручной отладки.
+// FlushYesterday отправляет в StorageGateway накопленные данные за вчера (UTC)
 func (h *StatsHandler) FlushYesterday(w http.ResponseWriter, r *http.Request) {
 	h.flushDate(w, r, utcYesterday())
 }
 
-// FlushToday — то же для сегодня (UTC). Для отладки: данные за сегодня
-// неполные, но полезно увидеть, что Tracker их видит.
+// FlushToday — то же для сегодня (UTC)
 func (h *StatsHandler) FlushToday(w http.ResponseWriter, r *http.Request) {
 	h.flushDate(w, r, utcToday())
 }
@@ -90,7 +88,6 @@ func (h *StatsHandler) flushDate(w http.ResponseWriter, r *http.Request, date ti
 // --- Stats ---
 
 // StatsYesterday возвращает накопленные пары author_id → count за вчера (UTC).
-// Ничего не отправляет и не удаляет — read-only срез Tracker.
 func (h *StatsHandler) StatsYesterday(w http.ResponseWriter, r *http.Request) {
 	h.statsFor(w, r, utcYesterday())
 }
