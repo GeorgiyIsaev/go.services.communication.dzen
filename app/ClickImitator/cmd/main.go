@@ -32,6 +32,12 @@ func run(cfg *config.Config, appLogger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// 1. Проверка существование топика
+	if err := client.VerifyTopicExists(ctx, cfg.Kafka.Brokers, cfg.Kafka.Topic, appLogger); err != nil {
+		return err
+	}
+
+	// 2. Создаём sender.
 	sender, err := client.NewKafkaClickSender(cfg.Kafka.Brokers, cfg.Kafka.Topic)
 	if err != nil {
 		return err

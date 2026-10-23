@@ -20,12 +20,8 @@ const (
 )
 
 type Kafka struct {
-	Brokers           []string
-	Topic             string
-	Partitions        int
-	ReplicationFactor int
-	Retention         time.Duration
-	Segment           time.Duration
+	Brokers []string
+	Topic   string
 }
 
 type Random struct {
@@ -77,12 +73,10 @@ func Load() *Config {
 		Mode:     mode,
 		LogLevel: parseLogLevel(getEnv("LOG_LEVEL", "info")),
 		Kafka: Kafka{
-			Brokers:           getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092", "localhost:9093", "localhost:9094"}),
-			Topic:             getEnv("KAFKA_TOPIC", "clicks"),
-			Partitions:        getEnvInt("KAFKA_PARTITIONS", 8),
-			ReplicationFactor: getEnvInt("KAFKA_REPLICATION_FACTOR", 3),
-			Retention:         getEnvDuration("KAFKA_RETENTION", 48*time.Hour),
-			Segment:           getEnvDuration("KAFKA_SEGMENT", 24*time.Hour),
+			Brokers: getEnvSlice("KAFKA_BROKERS", []string{
+				"localhost:9092", "localhost:9093", "localhost:9094",
+			}),
+			Topic: getEnv("KAFKA_TOPIC", "clicks"),
 		},
 		Random: Random{
 			AuthorIDStart:        getEnvInt64("AUTHOR_ID_START", 1),
@@ -111,12 +105,6 @@ func (c *Config) Validate() error {
 	if c.Kafka.Topic == "" {
 		return fmt.Errorf("kafka_topic не задан")
 	}
-	if c.Kafka.Partitions <= 0 {
-		return fmt.Errorf("kafka_partitions должен быть > 0")
-	}
-	if c.Kafka.ReplicationFactor <= 0 {
-		return fmt.Errorf("kafka_replication_factor должен быть > 0")
-	}
 
 	switch c.Mode {
 	case ModeRandom:
@@ -127,6 +115,12 @@ func (c *Config) Validate() error {
 		if c.Random.ReaderIDStart > c.Random.ReaderIDEnd {
 			return fmt.Errorf("reader_id_start (%d) > reader_id_end (%d)",
 				c.Random.ReaderIDStart, c.Random.ReaderIDEnd)
+		}
+		if c.Random.AuthorIDStart <= 0 {
+			return fmt.Errorf("author_id_start должен быть > 0")
+		}
+		if c.Random.ReaderIDStart <= 0 {
+			return fmt.Errorf("reader_id_start должен быть > 0")
 		}
 		if c.Random.MinReads < 0 {
 			return fmt.Errorf("min_reads должен быть >= 0")

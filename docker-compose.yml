@@ -13,10 +13,6 @@ services:
     environment:
       KAFKA_BROKERS: "kafka1:19092,kafka2:19093,kafka3:19094"
       KAFKA_TOPIC: clicks
-      KAFKA_PARTITIONS: 8
-      KAFKA_REPLICATION_FACTOR: 3
-      KAFKA_RETENTION: 48h
-      KAFKA_SEGMENT: 24h
       # Режим по умолчанию — random (дефолт и в коде тоже)
       GENERATOR_MODE: random
       # Random-параметры (дефолты можно переопределять при запуске)
@@ -286,7 +282,7 @@ services:
     networks:
       - kafka-net
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d click_analytics" ]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
       interval: 5s
       timeout: 5s
       retries: 10
