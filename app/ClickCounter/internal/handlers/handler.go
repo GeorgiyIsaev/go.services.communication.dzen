@@ -16,8 +16,6 @@ type Sender interface {
 	SendNow(ctx context.Context, date time.Time) error
 }
 
-// TrackerReader — интерфейс чтения накопленной статистики.
-// Реализуется service.Tracker.
 type TrackerReader interface {
 	GetByDate(date time.Time) []domain.AuthorStat
 }
@@ -72,7 +70,7 @@ func (h *StatsHandler) flushDate(w http.ResponseWriter, r *http.Request, date ti
 	if err := h.sender.SendNow(ctx, date); err != nil {
 		h.logger.ErrorContext(r.Context(), "manual flush failed",
 			"date", date.Format("2006-01-02"), "err", err)
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
