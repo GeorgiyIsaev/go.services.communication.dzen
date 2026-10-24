@@ -14,6 +14,7 @@ type mockRepo struct {
 	upsertStatsFn    func(ctx context.Context, date time.Time, stats []domain.AuthorStats) error
 	getStatsByDateFn func(ctx context.Context, date time.Time) ([]domain.AuthorStats, error)
 	getAuthorsFn     func(ctx context.Context) ([]domain.Author, error)
+	getStatsRangeFn  func(ctx context.Context, from, to time.Time) (map[string][]domain.AuthorStats, error)
 }
 
 func (m *mockRepo) UpsertStats(ctx context.Context, date time.Time, stats []domain.AuthorStats) error {
@@ -35,6 +36,13 @@ func (m *mockRepo) GetAuthors(ctx context.Context) ([]domain.Author, error) {
 		return nil, nil
 	}
 	return m.getAuthorsFn(ctx)
+}
+
+func (m *mockRepo) GetStatsRange(ctx context.Context, from, to time.Time) (map[string][]domain.AuthorStats, error) {
+	if m.getStatsRangeFn == nil {
+		return nil, nil
+	}
+	return m.getStatsRangeFn(ctx, from, to)
 }
 
 // fixedNow — «замороженное» время для детерминированных тестов.
@@ -256,6 +264,82 @@ func TestGetAuthors(t *testing.T) {
 		svc := newTestService(repo)
 
 		_, err := svc.GetAuthors(context.Background())
+		if !errors.Is(err, repoErr) {
+			t.Fatalf("want wrapped %v, got %v", repoErr, err)
+		}
+	})
+}
+
+func TestGetStatsRange(t *testing.T) {
+	from := time.Date(2025, 1, 5, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC)
+	want := map[string][]domain.AuthorStats{
+		"2025-01-15": {{AuthorID: 1, Count: 10}},
+	}
+	repoErr := errors.New("boom")
+
+	t.Run("success", func(t *testing.T) {
+		var gotFrom, gotTo time.Time
+		repo := &mockRepo{
+			getStatsRangeFn: func(_ context.Context, f, tl time.Time) (map[string][]domain.AuthorStats, error) {
+				gotFrom, gotTo = f, tl
+				return want, nil
+			},
+		}
+		svc := newTestService(repo)
+
+		got, err := svc.GetStatsRange(context.Background(), from, to)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 || len(got["2025-01-15"]) != 1 || got["2025-01-15"][0].Count != 10 {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+		if !gotFrom.Equal(from) || !gotTo.Equal(to) {
+			t.Fatalf("range passed to repo = [%v, %v], want [%v, %v]", gotFrom, gotTo, from, to)
+		}
+	})
+
+	t.Run("truncates dates to UTC midnight", func(t *testing.T) {
+		var gotFrom, gotTo time.Time
+		repo := &mockRepo{
+			getStatsRangeFn: func(_ context.Context, f, tl time.Time) (map[string][]domain.AuthorStats, error) {
+				gotFrom, gotTo = f, tl
+				return nil, nil
+			},
+		}
+		svc := newTestService(repo)
+
+		inFrom := time.Date(2025, 1, 5, 13, 30, 0, 0, time.UTC)
+		inTo := time.Date(2025, 1, 15, 23, 59, 0, 0, time.UTC)
+		if _, err := svc.GetStatsRange(context.Background(), inFrom, inTo); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !gotFrom.Equal(from) || !gotTo.Equal(to) {
+			t.Fatalf("truncated range = [%v, %v], want [%v, %v]", gotFrom, gotTo, from, to)
+		}
+	})
+
+	t.Run("zero date", func(t *testing.T) {
+		svc := newTestService(&mockRepo{})
+
+		if _, err := svc.GetStatsRange(context.Background(), time.Time{}, to); !errors.Is(err, ErrInvalidDate) {
+			t.Fatalf("want ErrInvalidDate, got %v", err)
+		}
+		if _, err := svc.GetStatsRange(context.Background(), from, time.Time{}); !errors.Is(err, ErrInvalidDate) {
+			t.Fatalf("want ErrInvalidDate, got %v", err)
+		}
+	})
+
+	t.Run("repo error is wrapped", func(t *testing.T) {
+		repo := &mockRepo{
+			getStatsRangeFn: func(context.Context, time.Time, time.Time) (map[string][]domain.AuthorStats, error) {
+				return nil, repoErr
+			},
+		}
+		svc := newTestService(repo)
+
+		_, err := svc.GetStatsRange(context.Background(), from, to)
 		if !errors.Is(err, repoErr) {
 			t.Fatalf("want wrapped %v, got %v", repoErr, err)
 		}

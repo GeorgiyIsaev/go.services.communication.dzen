@@ -21,6 +21,7 @@ type mockSvc struct {
 	saveStatsFn        func(ctx context.Context, stats []domain.AuthorStats, date time.Time) error
 	getDashboardDataFn func(ctx context.Context, date time.Time) ([]domain.AuthorStats, error)
 	getAuthorsFn       func(ctx context.Context) ([]domain.Author, error)
+	getStatsRangeFn    func(ctx context.Context, from, to time.Time) (map[string][]domain.AuthorStats, error)
 }
 
 func (m *mockSvc) SaveStats(ctx context.Context, stats []domain.AuthorStats, date time.Time) error {
@@ -42,6 +43,13 @@ func (m *mockSvc) GetAuthors(ctx context.Context) ([]domain.Author, error) {
 		return nil, nil
 	}
 	return m.getAuthorsFn(ctx)
+}
+
+func (m *mockSvc) GetStatsRange(ctx context.Context, from, to time.Time) (map[string][]domain.AuthorStats, error) {
+	if m.getStatsRangeFn == nil {
+		return nil, nil
+	}
+	return m.getStatsRangeFn(ctx, from, to)
 }
 
 func newTestHandler(svc StorageService) *StorageHandler {
