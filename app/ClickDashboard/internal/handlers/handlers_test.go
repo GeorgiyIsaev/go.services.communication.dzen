@@ -147,14 +147,17 @@ func TestGetStats_Success(t *testing.T) {
 }
 
 func TestGetStats_ErrorMapping(t *testing.T) {
+	// Хендлер различает ровно три исхода: ErrInvalidDays → 400,
+	// ErrSnapshotNotReady → 503, всё остальное (включая ошибки контекста) → 500.
 	cases := []struct {
 		name       string
 		svcErr     error
 		wantStatus int
 	}{
 		{"invalid days", service.ErrInvalidDays, http.StatusBadRequest},
-		{"upstream", service.ErrUpstream, http.StatusBadGateway},
-		{"deadline", context.DeadlineExceeded, http.StatusGatewayTimeout},
+		{"snapshot not ready", service.ErrSnapshotNotReady, http.StatusServiceUnavailable},
+		{"deadline", context.DeadlineExceeded, http.StatusInternalServerError},
+		{"canceled", context.Canceled, http.StatusInternalServerError},
 		{"unknown", errors.New("something"), http.StatusInternalServerError},
 	}
 
@@ -172,7 +175,6 @@ func TestGetStats_ErrorMapping(t *testing.T) {
 	}
 }
 
-// TODO проблема если в настройках меньше 5 дней упадем
 func TestGetStats_DefaultDaysRespectsMax(t *testing.T) {
 	svc := &mockStatsService{
 		matrix:  &domain.StatsMatrix{},
@@ -189,8 +191,9 @@ func TestGetStats_DefaultDaysRespectsMax(t *testing.T) {
 	}
 }
 
-// Тест ошибки 500 при потери клиента
-func TestGetStats_ClientCanceled_NoWrite(t *testing.T) {
+// Отменённый клиентский запрос не должен ронять хендлер: ответ — обычный
+// JSON-err, без паники и без обрыва записи.
+func TestGetStats_ClientCanceled_StillWritesJSONError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // отменили до вызова
 
@@ -200,8 +203,14 @@ func TestGetStats_ClientCanceled_NoWrite(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	// Главное: 500-ку не отдаём.
-	if rec.Code == http.StatusInternalServerError {
-		t.Errorf("got 500 for canceled request, want no 5xx")
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v (body=%q)", err, rec.Body.String())
+	}
+	if body["error"] == "" {
+		t.Errorf("body = %q, want non-empty error field", rec.Body.String())
 	}
 }
