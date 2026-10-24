@@ -132,6 +132,8 @@ func TestTracker_RejectsFutureMessages(t *testing.T) {
 }
 
 // --- Retention / cleanup ---
+// Очистку выполняет только Cleanup (его дёргает RunCleanup раз в сутки);
+// AddClickAt старые дни не трогает.
 
 func TestTracker_CleanupRemovesDaysBeforeYesterday(t *testing.T) {
 	t.Parallel()
@@ -143,7 +145,13 @@ func TestTracker_CleanupRemovesDaysBeforeYesterday(t *testing.T) {
 	// Прыгаем на 2 дня вперёд: day1 становится "позавчера".
 	day3 := day1.AddDate(0, 0, 2)
 	tr.SetNowFunc(func() time.Time { return day3 })
-	tr.AddClickAt(1, 100, day3) // триггерит cleanup
+	tr.AddClickAt(1, 100, day3) // свежий клик сам по себе не чистит старые дни
+
+	if stats := tr.GetByDate(day1); len(stats) != 1 {
+		t.Fatalf("day1 must be kept before Cleanup, got %+v", stats)
+	}
+
+	tr.Cleanup(day3) // ручной вызов — то же, что делает RunCleanup
 
 	if stats := tr.GetByDate(day1); len(stats) != 0 {
 		t.Errorf("expected day1 to be cleaned up, got %+v", stats)
@@ -162,6 +170,8 @@ func TestTracker_CleanupKeepsTodayAndYesterday(t *testing.T) {
 	tr.SetNowFunc(func() time.Time { return day3 })
 	tr.AddClickAt(2, 200, day2) // вчера
 	tr.AddClickAt(3, 300, day3) // сегодня
+
+	tr.Cleanup(day3) // оставляет только today (day3) и yesterday (day2)
 
 	// day1 должен быть удалён, day2 и day3 — остаться.
 	if stats := tr.GetByDate(day1); len(stats) != 0 {
