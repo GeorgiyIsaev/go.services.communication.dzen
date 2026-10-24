@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -31,15 +30,6 @@ func TestUpsertStats_Success(t *testing.T) {
 	stats := []domain.AuthorStats{{AuthorID: 1, Count: 10}}
 
 	mock.ExpectBegin()
-
-	// ensureAuthors: insert автора
-	mock.ExpectExec("INSERT INTO authors").
-		WithArgs(int64(1), "unknown_1@unknown.local").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-
-	// ensureAuthors: подтянуть sequence
-	mock.ExpectExec("SELECT setval").
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// upsert статистики через prepared statement
 	prep := mock.ExpectPrepare("INSERT INTO stats")
@@ -72,25 +62,8 @@ func TestUpsertStats_BeginTxError(t *testing.T) {
 	}
 }
 
-func TestUpsertStats_EnsureAuthorsFails_RollsBack(t *testing.T) {
-	repo, mock, cleanup := newMockRepo(t)
-	defer cleanup()
-
-	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO authors").
-		WillReturnError(errors.New("insert failed"))
-	// при ошибке должен произойти откат
-	mock.ExpectRollback()
-
-	err := repo.UpsertStats(context.Background(), time.Now(), []domain.AuthorStats{{AuthorID: 1, Count: 1}})
-	if err == nil {
-		t.Fatal("want error, got nil")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
-	}
-}
-
+// Авторы в UpsertStats не создаются (FK убран, заглушки синтезирует дашборд),
+// поэтому единственные источники ошибок здесь — BeginTx, prepare и сам exec.
 func TestUpsertStats_UpsertExecFails_RollsBack(t *testing.T) {
 	repo, mock, cleanup := newMockRepo(t)
 	defer cleanup()
@@ -99,8 +72,6 @@ func TestUpsertStats_UpsertExecFails_RollsBack(t *testing.T) {
 	stats := []domain.AuthorStats{{AuthorID: 1, Count: 10}}
 
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO authors").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("SELECT setval").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	prep := mock.ExpectPrepare("INSERT INTO stats")
 	prep.ExpectExec().
@@ -223,7 +194,3 @@ func TestGetAuthors_ScanError(t *testing.T) {
 		t.Fatal("want scan error, got nil")
 	}
 }
-
-// Заглушка, чтобы избежать неиспользуемого импорта database/sql,
-// если в будущем понадобится сравнение типов.
-var _ = sql.ErrNoRows

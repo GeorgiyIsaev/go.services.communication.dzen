@@ -18,8 +18,7 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 }
 
 // UpsertStats атомарно сохраняет статистику за день.
-// При конфликте (author_id, date) обновляет clicks, только если новое значение больше существующего
-// Отсутствующие авторы создаются в той же транзакции.
+// При конфликте (author_id, date) обновляет clicks, только если новое значение больше существующего.
 func (r *PostgresRepository) UpsertStats(ctx context.Context, date time.Time, stats []domain.AuthorStats) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -28,10 +27,6 @@ func (r *PostgresRepository) UpsertStats(ctx context.Context, date time.Time, st
 	defer func() {
 		_ = tx.Rollback()
 	}()
-
-	if err := ensureAuthors(ctx, tx, stats); err != nil {
-		return fmt.Errorf("ensure authors: %w", err)
-	}
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO stats (author_id, date, clicks)
@@ -105,34 +100,6 @@ func (r *PostgresRepository) GetAuthors(ctx context.Context) ([]domain.Author, e
 		return nil, fmt.Errorf("iterate author rows: %w", err)
 	}
 	return result, nil
-}
-
-// ensureAuthors гарантирует наличие всех author_id из stats в таблице authors.
-// Отсутствующие создаются с заглушками: first_name='unknown', last_name='unknown',
-// email=unknown_<id>@unknown.local
-func ensureAuthors(ctx context.Context, tx *sql.Tx, stats []domain.AuthorStats) error {
-	for _, s := range stats {
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO authors (id, email, first_name, last_name)
-			VALUES ($1, $2, 'unknown', 'unknown')
-			ON CONFLICT (id) DO NOTHING`,
-			s.AuthorID,
-			fmt.Sprintf("unknown_%d@unknown.local", s.AuthorID),
-		)
-		if err != nil {
-			return fmt.Errorf("insert author %d: %w", s.AuthorID, err)
-		}
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		SELECT setval(
-			pg_get_serial_sequence('authors', 'id'),
-			GREATEST((SELECT COALESCE(MAX(id), 0) FROM authors), 1)
-		)`); err != nil {
-		return fmt.Errorf("setval authors_id_seq: %w", err)
-	}
-
-	return nil
 }
 
 // GetStatsRange возвращает статистику за диапазон дат включительно.
