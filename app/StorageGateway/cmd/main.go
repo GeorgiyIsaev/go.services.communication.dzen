@@ -76,7 +76,7 @@ func run(appLogger *slog.Logger) error {
 	}()
 
 	// --- gRPC Сервер (для ClickDashboard) ---
-	grpcHandler := handlers.NewGRPCStorageHandler(svc)
+	grpcHandler := handlers.NewGRPCStorageHandler(svc, appLogger)
 	grpcSrv := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			middleware.GRPCRequestID(),

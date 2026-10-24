@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -12,17 +13,22 @@ import (
 
 type GRPCStorageHandler struct {
 	pb.UnimplementedStorageGatewayServer
-	svc StorageService
+	svc    StorageService
+	logger *slog.Logger
 }
 
-func NewGRPCStorageHandler(svc StorageService) *GRPCStorageHandler {
-	return &GRPCStorageHandler{svc: svc}
+func NewGRPCStorageHandler(svc StorageService, logger *slog.Logger) *GRPCStorageHandler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &GRPCStorageHandler{svc: svc, logger: logger}
 }
 
 func (h *GRPCStorageHandler) GetAuthors(ctx context.Context, req *pb.GetAuthorsRequest) (*pb.GetAuthorsResponse, error) {
 	authors, err := h.svc.GetAuthors(ctx)
 	if err != nil {
-		return nil, err
+		h.logger.ErrorContext(ctx, "get authors: internal error", "err", err)
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 
 	pbAuthors := make([]*pb.Author, len(authors))
@@ -46,10 +52,15 @@ func (h *GRPCStorageHandler) GetStatsRange(ctx context.Context, req *pb.GetStats
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid to_date format, expected YYYY-MM-DD")
 	}
+	if from.After(to) {
+		return nil, status.Error(codes.InvalidArgument, "from_date must not be after to_date")
+	}
 
 	statsByDate, err := h.svc.GetStatsRange(ctx, from, to)
 	if err != nil {
-		return nil, err
+		h.logger.ErrorContext(ctx, "get stats range: internal error",
+			"err", err, "from", req.FromDate, "to", req.ToDate)
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 
 	var pbDays []*pb.DailyStats

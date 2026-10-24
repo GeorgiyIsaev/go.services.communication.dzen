@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -45,7 +46,7 @@ func GRPCRecover(logger *slog.Logger) grpc.UnaryServerInterceptor {
 					"method", info.FullMethod,
 					"stack", string(debug.Stack()),
 				)
-				err = status.Errorf(13, "internal error") // codes.Internal
+				err = status.Error(codes.Internal, "internal error")
 			}
 		}()
 		return handler(ctx, req)
