@@ -225,6 +225,56 @@ func TestRefresh_StatsRangeError(t *testing.T) {
 	}
 }
 
+// Автор, которого нет в справочнике, но по которому есть статистика,
+// получает строку-заглушку — ту же, что раньше создавал ensureAuthors в БД.
+func TestRefresh_SynthesizesPlaceholderForUnknownAuthor(t *testing.T) {
+	client := &mockClient{
+		authors: []domain.Author{
+			{ID: 1, FirstName: "Alice", LastName: "A", Email: "a@a"},
+		},
+		statsByDate: func(_, to time.Time) map[string][]domain.AuthorStats {
+			return map[string][]domain.AuthorStats{
+				to.Format("2006-01-02"): {{AuthorID: 1, Count: 10}, {AuthorID: 250, Count: 5}},
+			}
+		},
+	}
+	svc, _ := newTestService(client, 30)
+
+	if err := svc.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	res, err := svc.GetStats(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+
+	if len(res.Authors) != 2 {
+		t.Fatalf("len(Authors) = %d, want 2: %+v", len(res.Authors), res.Authors)
+	}
+
+	// id=1 — настоящий автор из справочника.
+	real := res.Authors[0]
+	if real.ID != 1 || real.FirstName != "Alice" || real.Email != "a@a" {
+		t.Errorf("real author = %+v, want id=1 Alice a@a", real)
+	}
+	if got := real.Clicks; len(got) != 1 || got[0] != 10 {
+		t.Errorf("real author clicks = %v, want [10]", got)
+	}
+
+	// id=250 — синтезированная заглушка, отсортирована по id.
+	ph := res.Authors[1]
+	if ph.ID != 250 || ph.FirstName != "unknown" || ph.LastName != "unknown" {
+		t.Errorf("placeholder = %+v, want id=250 unknown/unknown", ph)
+	}
+	if ph.Email != "unknown_250@unknown.local" {
+		t.Errorf("placeholder email = %q, want unknown_250@unknown.local", ph.Email)
+	}
+	if got := ph.Clicks; len(got) != 1 || got[0] != 5 {
+		t.Errorf("placeholder clicks = %v, want [5]", got)
+	}
+}
+
 // Run должен завершиться по отмене ctx, даже если клиент постоянно падает
 // (стартовые ретраи не должны подвесить процесс).
 func TestRun_StopsOnContextCancel(t *testing.T) {

@@ -165,21 +165,39 @@ func (s *StatsService) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// buildSnapshot собирает иммутабельный Snapshot из сырых данных.
+// buildSnapshot собирает иммутабельный Snapshot из сырых данных:
+// даты → индекс кликов → авторы (со синтезом заглушек) → строки таблицы.
 func buildSnapshot(
 	authors []domain.Author,
 	statsByDate map[string][]domain.AuthorStats,
 	from, to time.Time,
 	maxDays int,
 ) *Snapshot {
-	// Даты по убыванию: to (вчера), to-1, ..., from.
+	dates := dateRange(from, to, maxDays)
+	clicks := indexClicks(statsByDate)
+	ids, byID := resolveAuthors(authors, clicks)
+	rows := buildRows(ids, byID, clicks, dates)
+
+	return &Snapshot{
+		Dates:   dates,
+		Authors: rows,
+		MaxDays: maxDays,
+		BuiltAt: time.Now(),
+	}
+}
+
+// dateRange возвращает даты по убыванию: to (свежайшая слева), to-1, ..., from.
+func dateRange(from, to time.Time, maxDays int) []string {
 	dates := make([]string, 0, maxDays)
 	for d := to; !d.Before(from); d = d.AddDate(0, 0, -1) {
 		dates = append(dates, d.Format("2006-01-02"))
 	}
+	return dates
+}
 
-	// Индекс: authorID → dateStr → clicks.
-	clicks := make(map[int64]map[string]int64, len(authors))
+// indexClicks строит индекс: authorID → dateStr → clicks.
+func indexClicks(statsByDate map[string][]domain.AuthorStats) map[int64]map[string]int64 {
+	clicks := make(map[int64]map[string]int64, len(statsByDate))
 	for dateStr, dayStats := range statsByDate {
 		for _, st := range dayStats {
 			m, ok := clicks[st.AuthorID]
@@ -190,11 +208,48 @@ func buildSnapshot(
 			m[dateStr] = st.Count
 		}
 	}
+	return clicks
+}
 
-	sort.Slice(authors, func(i, j int) bool { return authors[i].ID < authors[j].ID })
+// resolveAuthors - Добавляет к существующим авторам временных
+// если их нет в бд, но есть статистика по ним
+func resolveAuthors(
+	authors []domain.Author,
+	clicks map[int64]map[string]int64,
+) ([]int64, map[int64]domain.Author) {
+	byID := make(map[int64]domain.Author, len(authors))
+	ids := make([]int64, 0, len(authors))
+	for _, a := range authors {
+		if _, ok := byID[a.ID]; !ok {
+			ids = append(ids, a.ID)
+		}
+		byID[a.ID] = a
+	}
+	for authorID := range clicks {
+		if _, ok := byID[authorID]; !ok {
+			ids = append(ids, authorID)
+			byID[authorID] = domain.Author{
+				ID:        authorID,
+				FirstName: "unknown",
+				LastName:  "unknown",
+				Email:     fmt.Sprintf("unknown_%d@unknown.local", authorID),
+			}
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids, byID
+}
 
-	rows := make([]domain.AuthorRow, len(authors))
-	for i, a := range authors {
+// buildRows собирает строки таблицы дашборда в порядке ids:
+func buildRows(
+	ids []int64,
+	byID map[int64]domain.Author,
+	clicks map[int64]map[string]int64,
+	dates []string,
+) []domain.AuthorRow {
+	rows := make([]domain.AuthorRow, len(ids))
+	for i, id := range ids {
+		a := byID[id]
 		row := domain.AuthorRow{
 			ID:        a.ID,
 			FirstName: a.FirstName,
@@ -209,11 +264,5 @@ func buildSnapshot(
 		}
 		rows[i] = row
 	}
-
-	return &Snapshot{
-		Dates:   dates,
-		Authors: rows,
-		MaxDays: maxDays,
-		BuiltAt: time.Now(),
-	}
+	return rows
 }
