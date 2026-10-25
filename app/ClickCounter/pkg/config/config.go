@@ -33,12 +33,12 @@ type Gateway struct {
 	Timeout time.Duration
 }
 
-// Retries — политика ретраев отправки. Используется в service.Sender.
+// Retries — политика ретраев flush в StorageGateway. Используется в service.Sender.
+// Delays — расписание пауз между попытками (по возрастанию): после неудачной
+// попытки ждём Delays[0], затем Delays[1] и т.д.; исчерпание расписания = провал.
+// Пустой Delays = ретраев нет (только одна попытка).
 type Retries struct {
-	MaxRetries  int           // попыток между длинными паузами
-	Delay       time.Duration // пауза между обычными попытками
-	LongDelay   time.Duration // пауза после MaxRetries неудачных попыток
-	MaxDuration time.Duration // общий бюджет на один flush (после — сдаёмся)
+	Delays []time.Duration
 }
 
 // Scheduler — моменты ежедневной отправки. Hours: [0, 1] → 00:05 и 01:05 UTC.
@@ -69,18 +69,20 @@ func Load() *Config {
 			IdleTimeout:       getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
 		},
 		Kafka: Kafka{
-			Brokers: getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
-			Topic:   getEnv("KAFKA_TOPIC", "clicks"),
+			Brokers: getEnvSlice("KAFKA_BROKERS", []string{
+				"localhost:9092", "localhost:9093", "localhost:9094",
+			}),
+			Topic: getEnv("KAFKA_TOPIC", "clicks"),
 		},
 		Gateway: Gateway{
 			URL:     getEnv("STORAGE_GATEWAY_URL", "http://localhost:8084"),
 			Timeout: getEnvDuration("STORAGE_GATEWAY_TIMEOUT", 10*time.Second),
 		},
 		Retries: Retries{
-			MaxRetries:  getEnvInt("MAX_RETRIES", 5),
-			Delay:       getEnvDuration("RETRY_DELAY", 1*time.Minute),
-			LongDelay:   getEnvDuration("LONG_RETRY_DELAY", 30*time.Minute),
-			MaxDuration: getEnvDuration("MAX_FLUSH_DURATION", 2*time.Hour),
+			// Дефолт: экспоненциальные паузы 1+2+4+8 = 15 минут, 5 попыток.
+			// После исчерпания — фиксируем провал в логе и больше не повторяем.
+			Delays: getEnvDurationSlice("FLUSH_RETRY_DELAYS",
+				[]time.Duration{1 * time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute}),
 		},
 		Scheduler: Scheduler{
 			Hours:  getEnvIntSlice("SCHEDULER_HOURS", []int{0, 1}),
@@ -159,4 +161,35 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// getEnvDurationSlice парсит список длительностей через запятую: "1m,2m,4m,8m".
+// Некорректный элемент или пустое значение → fallback целиком.
+func getEnvDurationSlice(key string, fallback []time.Duration) []time.Duration {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
+	}
+	parts := strings.Split(v, ",")
+	out := make([]time.Duration, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		d, err := time.ParseDuration(p)
+		if err != nil {
+			log.Printf("config: invalid duration in %s=%q, using default %v", key, v, fallback)
+			return fallback
+		}
+		if d <= 0 {
+			log.Printf("config: non-positive duration in %s=%q, using default %v", key, v, fallback)
+			return fallback
+		}
+		out = append(out, d)
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return out
 }

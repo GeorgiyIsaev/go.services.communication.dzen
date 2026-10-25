@@ -45,10 +45,16 @@ func (k *KafkaClickSender) Send(ctx context.Context, req domain.ClickEvent) erro
 	}
 	// Ключ = AuthorID. Клики одного автора попадают в одну партицию.
 	key := []byte(strconv.FormatInt(req.AuthorID, 10))
+	// Дату события определяет имитатор: она лежит в payload (timestamp)
+	// и дублируется в Time сообщения — каунтер использует её же.
+	msgTime := req.Timestamp
+	if msgTime.IsZero() {
+		msgTime = time.Now().UTC()
+	}
 	msg := kafka.Message{
 		Key:   key,
 		Value: value,
-		Time:  time.Now().UTC(),
+		Time:  msgTime,
 	}
 	if err := k.writer.WriteMessages(ctx, msg); err != nil {
 		return fmt.Errorf("ошибка отправки в Kafka: %w", err)

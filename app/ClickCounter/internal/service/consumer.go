@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -14,9 +15,13 @@ import (
 )
 
 // ClickMessage — формат сообщения в топике clicks.
+// Контракт зеркалит domain.ClickEvent имитатора: дату клика определяет
+// имитатор и пишет её в timestamp. Поле обязательно: нулевой timestamp =
+// нарушение контракта, сообщение отбрасывается (без fallback'ов).
 type ClickMessage struct {
-	UserID   int64 `json:"user_id"`
-	AuthorID int64 `json:"author_id"`
+	UserID    int64     `json:"user_id"`
+	AuthorID  int64     `json:"author_id"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // Consumer читает клики из всех партиций топика
@@ -74,25 +79,63 @@ func (c *Consumer) Run(ctx context.Context) error {
 	return nil
 }
 
-// discoverPartitions дёргает Metadata API у первого доступного брокера.
+// discoverPartitions запрашивает метаданные у брокеров по очереди
 func (c *Consumer) discoverPartitions(ctx context.Context) ([]int, error) {
-	dialer := &kafka.Dialer{Timeout: 10 * time.Second}
-	conn, err := dialer.DialContext(ctx, "tcp", c.cfg.Brokers[0])
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", c.cfg.Brokers[0], err)
-	}
-	defer conn.Close()
+	return discoverPartitionsFrom(ctx, c.cfg.Brokers, func(ctx context.Context, broker string) ([]kafka.Partition, error) {
+		dialer := &kafka.Dialer{Timeout: 10 * time.Second}
+		conn, err := dialer.DialContext(ctx, "tcp", broker)
+		if err != nil {
+			c.logger.Warn("kafka: broker unavailable",
+				"broker", broker, "err", err)
+			return nil, err
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		parts, err := conn.ReadPartitions(c.cfg.Topic)
+		if err != nil {
+			c.logger.Warn("kafka: broker unavailable",
+				"broker", broker, "err", err)
+			return nil, err
+		}
+		return parts, nil
+	})
+}
 
-	parts, err := conn.ReadPartitions(c.cfg.Topic)
-	if err != nil {
-		return nil, fmt.Errorf("read partitions of %q: %w", c.cfg.Topic, err)
+// discoverPartitionsFrom идёт по списку брокеров до успеха.
+func discoverPartitionsFrom(
+	ctx context.Context,
+	brokers []string,
+	fn func(ctx context.Context, broker string) ([]kafka.Partition, error),
+) ([]int, error) {
+	if len(brokers) == 0 {
+		return nil, errors.New("no kafka brokers configured")
 	}
 
-	ids := make([]int, 0, len(parts))
-	for _, p := range parts {
-		ids = append(ids, p.ID)
+	var errs []error
+	for _, broker := range brokers {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		parts, err := fn(ctx, broker)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("broker %s: %w", broker, err))
+			continue
+		}
+
+		ids := make([]int, 0, len(parts))
+		seen := make(map[int]struct{}, len(parts))
+		for _, p := range parts {
+			if _, ok := seen[p.ID]; ok {
+				continue
+			}
+			seen[p.ID] = struct{}{}
+			ids = append(ids, p.ID)
+		}
+		return ids, nil
 	}
-	return ids, nil
+
+	return nil, fmt.Errorf("kafka: no broker available (%d tried): %w", len(brokers), errors.Join(errs...))
 }
 
 func (c *Consumer) consumePartition(ctx context.Context, partition int, r *kafka.Reader) {
@@ -126,13 +169,28 @@ func (c *Consumer) consumePartition(ctx context.Context, partition int, r *kafka
 			continue
 		}
 
-		at := msg.Time
-		if at.IsZero() {
-			at = time.Now().UTC()
+		at, ok := eventTime(m)
+		if !ok {
+			log.Warn("contract violation: message without timestamp, dropped",
+				"offset", msg.Offset,
+				"user_id", m.UserID, "author_id", m.AuthorID)
+			continue
 		}
 		c.tracker.AddClickAt(m.AuthorID, m.UserID, at)
 		processed++
 	}
+}
+
+// eventTime возвращает момент клика из контрактного поля timestamp —
+// его определяет имитатор (см. domain.ClickEvent).
+// Нулевое поле = нарушение контракта: (zero, false), сообщение отбрасывается
+// вызывающим. Fallback'ов на время брокера или «сейчас» нет — политика
+// «только контракт, нарушителей отбрасываем».
+func eventTime(m ClickMessage) (time.Time, bool) {
+	if m.Timestamp.IsZero() {
+		return time.Time{}, false
+	}
+	return m.Timestamp, true
 }
 
 // Close закрывает все ридеры. Вызывать после возврата из Run.

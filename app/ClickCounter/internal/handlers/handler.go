@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
 	"time"
 
 	"go.services.communication.dzen/app/ClickCounter/internal/domain"
+	"go.services.communication.dzen/app/ClickCounter/internal/service"
 )
 
 // Sender — интерфейс отправки в StorageGateway.
@@ -68,9 +70,15 @@ func (h *StatsHandler) flushDate(w http.ResponseWriter, r *http.Request, date ti
 		"date", date.Format("2006-01-02"))
 
 	if err := h.sender.SendNow(ctx, date); err != nil {
-		h.logger.ErrorContext(r.Context(), "manual flush failed",
+		if errors.Is(err, service.ErrFlushInProgress) {
+			h.logger.WarnContext(r.Context(), "manual flush rejected: another flush is in progress",
+				"date", date.Format("2006-01-02"))
+			writeError(w, http.StatusServiceUnavailable, "flush already in progress")
+			return
+		}
+		h.logger.ErrorContext(r.Context(), "manual flush failed, retrying in background",
 			"date", date.Format("2006-01-02"), "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeError(w, http.StatusInternalServerError, "flush failed, retrying in background")
 		return
 	}
 

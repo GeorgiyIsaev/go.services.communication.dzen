@@ -181,10 +181,7 @@ func (noopClient) SendStats(context.Context, time.Time, []domain.AuthorStat) err
 func newTestSenderForScheduler() *Sender {
 	tracker := NewTracker()
 	cfg := config.Retries{
-		MaxRetries:  1,
-		Delay:       5 * time.Millisecond,
-		LongDelay:   5 * time.Millisecond,
-		MaxDuration: 50 * time.Millisecond,
+		Delays: []time.Duration{5 * time.Millisecond},
 	}
 	return NewSender(tracker, noopClient{}, testLogger(), cfg)
 }
