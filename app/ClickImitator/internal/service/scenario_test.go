@@ -11,7 +11,7 @@ import (
 	"go.services.communication.dzen/app/ClickImitator/pkg/config"
 )
 
-var testSenderCfg = config.Sender{MaxRetries: 1, SendTimeout: time.Second}
+var testSenderCfg = config.Sender{SendTimeout: time.Second} // без ретраев
 
 func TestScenarioStrategy_Name(t *testing.T) {
 	svc := NewScenarioStrategy(config.Scenario{}, nil, discardLogger())

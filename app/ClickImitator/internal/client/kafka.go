@@ -38,15 +38,13 @@ func NewKafkaClickSender(brokers []string, topic string) (*KafkaClickSender, err
 	return &KafkaClickSender{writer: w}, nil
 }
 
-func (k *KafkaClickSender) Send(ctx context.Context, req domain.ClickEvent) error {
+func (k *KafkaClickSender) Send(ctx context.Context, req domain.ClickMessage) error {
 	value, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("ошибка маршалинга: %w", err)
 	}
 	// Ключ = AuthorID. Клики одного автора попадают в одну партицию.
 	key := []byte(strconv.FormatInt(req.AuthorID, 10))
-	// Дату события определяет имитатор: она лежит в payload (timestamp)
-	// и дублируется в Time сообщения — каунтер использует её же.
 	msgTime := req.Timestamp
 	if msgTime.IsZero() {
 		msgTime = time.Now().UTC()

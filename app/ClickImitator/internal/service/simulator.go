@@ -11,8 +11,6 @@ import (
 	"go.services.communication.dzen/app/ClickImitator/pkg/config"
 )
 
-var initialSendBackoff = 500 * time.Millisecond
-
 type Strategy interface {
 	Name() string
 	TotalUsers() int64
@@ -27,9 +25,6 @@ type Simulator struct {
 }
 
 func NewSimulator(strategy Strategy, sender domain.ClickSender, cfg config.Sender, logger *slog.Logger) *Simulator {
-	if cfg.MaxRetries <= 0 {
-		cfg.MaxRetries = 1
-	}
 	if cfg.SendTimeout <= 0 {
 		cfg.SendTimeout = 5 * time.Second
 	}
@@ -56,17 +51,14 @@ func (s *Simulator) Run(ctx context.Context) error {
 	return nil
 }
 
-func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.ClickEvent, cfg config.Sender, logger *slog.Logger) error {
-	attempts := cfg.MaxRetries
-	if attempts <= 0 {
-		attempts = 1
-	}
+// sendWithRetry шлёт клик по расписанию cfg.RetryDelays
+func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.ClickMessage, cfg config.Sender, logger *slog.Logger) error {
 	timeout := cfg.SendTimeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
+	attempts := 1 + len(cfg.RetryDelays)
 
-	backoff := initialSendBackoff
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
 		if ctx.Err() != nil {
@@ -85,22 +77,24 @@ func sendWithRetry(ctx context.Context, sender domain.ClickSender, req domain.Cl
 		}
 
 		lastErr = err
+		if attempt == attempts {
+			break // расписание исчерпано
+		}
+
+		delay := cfg.RetryDelays[attempt-1]
+		var jitter time.Duration
+		if half := int64(delay / 2); half > 0 {
+			jitter = time.Duration(rand.Int63n(half))
+		}
 		logger.Warn("send attempt failed",
 			"user_id", req.UserID, "author_id", req.AuthorID,
-			"attempt", attempt, "max", attempts, "err", err)
+			"attempt", attempt, "max", attempts,
+			"retry_in", delay+jitter, "err", err)
 
-		if attempt < attempts {
-			half := int64(backoff / 2)
-			var jitter time.Duration
-			if half > 0 {
-				jitter = time.Duration(rand.Int63n(half))
-			}
-			select {
-			case <-time.After(backoff + jitter):
-			case <-ctx.Done():
-				return nil // graceful abort в паузе
-			}
-			backoff *= 2
+		select {
+		case <-time.After(delay + jitter):
+		case <-ctx.Done():
+			return nil // graceful abort в паузе
 		}
 	}
 

@@ -71,7 +71,7 @@ func (s *RandomStrategy) runReader(
 		readWg.Add(1)
 		go func(aID int64) {
 			defer readWg.Done()
-			req := domain.ClickEvent{
+			req := domain.ClickMessage{
 				UserID:    readerID,
 				AuthorID:  aID,
 				Timestamp: time.Now().UTC(),

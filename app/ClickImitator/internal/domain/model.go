@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// ClickEvent — то, что уходит в Kafka. Формат совпадает с тем,
-// что ожидает ClickCounter (ClickMessage).
-type ClickEvent struct {
+// ClickMessage — то, что уходит в Kafka.
+type ClickMessage struct {
 	UserID    int64     `json:"user_id"`
 	AuthorID  int64     `json:"author_id"`
 	Timestamp time.Time `json:"timestamp"`
@@ -17,7 +16,7 @@ type ClickEvent struct {
 // ClickSender — контракт на отправку клика (порт).
 // Реализация — в internal/client.
 type ClickSender interface {
-	Send(ctx context.Context, req ClickEvent) error
+	Send(ctx context.Context, req ClickMessage) error
 }
 
 // Scenario описывает сценарий чтений одного пользователя.
