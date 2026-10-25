@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"go.services.communication.dzen/app/ClickDashboard/internal/domain"
+	"go.services.communication.dzen/app/ClickDashboard/pkg/config"
 )
 
 // Ошибки сервиса.
@@ -27,26 +28,28 @@ type StorageGatewayClient interface {
 
 // StatsService держит проекцию в памяти и периодически её обновляет.
 type StatsService struct {
-	client          StorageGatewayClient
-	store           *Store
-	logger          *slog.Logger
-	maxDays         int
-	refreshInterval time.Duration
+	client             StorageGatewayClient
+	store              *Store
+	logger             *slog.Logger
+	maxDays            int
+	refreshInterval    time.Duration
+	startupRetryDelays []time.Duration
 }
 
+// NewStatsService принимает свою часть конфига — config.Projection.
 func NewStatsService(
 	client StorageGatewayClient,
 	store *Store,
 	logger *slog.Logger,
-	maxDays int,
-	refreshInterval time.Duration,
+	cfg config.Projection,
 ) *StatsService {
 	return &StatsService{
-		client:          client,
-		store:           store,
-		logger:          logger,
-		maxDays:         maxDays,
-		refreshInterval: refreshInterval,
+		client:             client,
+		store:              store,
+		logger:             logger,
+		maxDays:            cfg.MaxDays,
+		refreshInterval:    cfg.RefreshInterval,
+		startupRetryDelays: cfg.StartupRetryDelays,
 	}
 }
 
@@ -70,13 +73,9 @@ func (s *StatsService) GetStats(ctx context.Context, days int) (*domain.StatsMat
 
 // Run — блокирующий цикл фоновых обновлений.
 func (s *StatsService) Run(ctx context.Context) {
-	const (
-		startupRetries    = 6
-		startupRetryDelay = 10 * time.Second
-	)
-
 	refreshed := false
-	for i := 0; i < startupRetries; i++ {
+	attempts := 1 + len(s.startupRetryDelays)
+	for attempt := 1; attempt <= attempts; attempt++ {
 		rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		err := s.Refresh(rctx)
 		cancel()
@@ -87,12 +86,16 @@ func (s *StatsService) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if attempt == attempts {
+			break
+		}
+		delay := s.startupRetryDelays[attempt-1]
 		s.logger.Warn("initial refresh failed",
-			"err", err, "attempt", i+1, "retry_in", startupRetryDelay)
+			"err", err, "attempt", attempt, "max", attempts, "retry_in", delay)
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(startupRetryDelay):
+		case <-time.After(delay):
 		}
 	}
 	if !refreshed {
@@ -166,7 +169,7 @@ func (s *StatsService) Refresh(ctx context.Context) error {
 }
 
 // buildSnapshot собирает иммутабельный Snapshot из сырых данных:
-// даты → индекс кликов → авторы (со синтезом заглушек) → строки таблицы.
+// даты → индекс кликов → авторы (с синтезом заглушек) → строки таблицы.
 func buildSnapshot(
 	authors []domain.Author,
 	statsByDate map[string][]domain.AuthorStats,

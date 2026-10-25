@@ -4,21 +4,34 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
 )
 
+// Server — параметры HTTP-сервера дашборда.
+type Server struct {
+	Port string
+}
+
+// Gateway — подключение к StorageGateway (gRPC-контракт).
+type Gateway struct {
+	Addr    string        // host:port,
+	Timeout time.Duration // таймаут на один RPC
+}
+
+// Projection — параметры in-memory проекции
+type Projection struct {
+	MaxDays            int
+	RefreshInterval    time.Duration   //период для рефреш
+	StartupRetryDelays []time.Duration //список с ретраями
+}
+
 type Config struct {
-	ServerPort string
-
-	// StorageGateway (gRPC).
-	StorageGatewayAddr    string        // host:port, без схемы
-	StorageGatewayTimeout time.Duration // таймаут на один RPC
-
-	// Лимит дней в проекции и период её обновления.
-	MaxDays         int
-	RefreshInterval time.Duration
+	Server     Server
+	Gateway    Gateway
+	Projection Projection
 }
 
 func Load() *Config {
@@ -27,17 +40,23 @@ func Load() *Config {
 	}
 
 	cfg := &Config{
-		ServerPort: getEnv("PORT_CLICK_DASHBOARD", "8085"),
-
-		StorageGatewayAddr:    getEnv("STORAGE_GATEWAY_ADDR", "localhost:9084"),
-		StorageGatewayTimeout: getEnvDuration("STORAGE_GATEWAY_TIMEOUT", 10*time.Second),
-
-		MaxDays:         getEnvMaxDays("MAX_DAYS", 30),
-		RefreshInterval: getEnvDuration("REFRESH_INTERVAL", 5*time.Minute),
+		Server: Server{
+			Port: getEnv("CLICK_DASHBOARD_PORT", "8085"),
+		},
+		Gateway: Gateway{
+			Addr:    getEnv("CLICK_DASHBOARD_STORAGE_GATEWAY_ADDR", "localhost:9084"),
+			Timeout: getEnvDuration("CLICK_DASHBOARD_STORAGE_GATEWAY_TIMEOUT", 10*time.Second),
+		},
+		Projection: Projection{
+			MaxDays:         getEnvMaxDays("CLICK_DASHBOARD_MAX_DAYS", 30),
+			RefreshInterval: getEnvDuration("CLICK_DASHBOARD_REFRESH_INTERVAL", 5*time.Minute),
+			StartupRetryDelays: getEnvDurationSlice("CLICK_DASHBOARD_STARTUP_RETRY_DELAYS",
+				[]time.Duration{10 * time.Second, 10 * time.Second, 10 * time.Second, 10 * time.Second, 10 * time.Second}),
+		},
 	}
 
-	if cfg.RefreshInterval <= 0 {
-		log.Fatalf("config: REFRESH_INTERVAL must be > 0, got %s", cfg.RefreshInterval)
+	if cfg.Projection.RefreshInterval <= 0 {
+		log.Fatalf("config: CLICK_DASHBOARD_REFRESH_INTERVAL must be > 0, got %s", cfg.Projection.RefreshInterval)
 	}
 
 	return cfg
@@ -77,4 +96,35 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// getEnvDurationSlice парсит список длительностей через запятую: "10s,10s,20s".
+// Некорректный/неположительный элемент или пустое значение → fallback целиком.
+func getEnvDurationSlice(key string, fallback []time.Duration) []time.Duration {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
+	}
+	parts := strings.Split(v, ",")
+	out := make([]time.Duration, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		d, err := time.ParseDuration(p)
+		if err != nil {
+			log.Printf("config: invalid duration in %s=%q, using default %v", key, v, fallback)
+			return fallback
+		}
+		if d <= 0 {
+			log.Printf("config: non-positive duration in %s=%q, using default %v", key, v, fallback)
+			return fallback
+		}
+		out = append(out, d)
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return out
 }

@@ -39,14 +39,14 @@ func run(appLogger *slog.Logger) error {
 	defer stop()
 
 	// gRPC-клиент к StorageGateway.
-	sgClient, err := client.NewStorageGatewayClient(cfg.StorageGatewayAddr, cfg.StorageGatewayTimeout)
+	sgClient, err := client.NewStorageGatewayClient(cfg.Gateway.Addr, cfg.Gateway.Timeout)
 	if err != nil {
 		return fmt.Errorf("storage gateway client: %w", err)
 	}
 	defer sgClient.Close()
 
 	store := service.NewStore()
-	svc := service.NewStatsService(sgClient, store, appLogger, cfg.MaxDays, cfg.RefreshInterval)
+	svc := service.NewStatsService(sgClient, store, appLogger, cfg.Projection)
 
 	// refresh-цикл для проекции
 	go svc.Run(ctx)
@@ -68,7 +68,7 @@ func run(appLogger *slog.Logger) error {
 	handler = middleware.RequestID(handler)
 
 	srv := &http.Server{
-		Addr:              ":" + cfg.ServerPort,
+		Addr:              ":" + cfg.Server.Port,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       35 * time.Second,
@@ -79,10 +79,10 @@ func run(appLogger *slog.Logger) error {
 	errCh := make(chan error, 1)
 	go func() {
 		appLogger.Info("ClickDashboard started",
-			"port", cfg.ServerPort,
-			"storage_gateway_addr", cfg.StorageGatewayAddr,
-			"max_days", cfg.MaxDays,
-			"refresh_interval", cfg.RefreshInterval.String())
+			"port", cfg.Server.Port,
+			"storage_gateway_addr", cfg.Gateway.Addr,
+			"max_days", cfg.Projection.MaxDays,
+			"refresh_interval", cfg.Projection.RefreshInterval.String())
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

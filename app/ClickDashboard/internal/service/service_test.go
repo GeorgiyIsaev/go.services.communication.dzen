@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.services.communication.dzen/app/ClickDashboard/internal/domain"
+	"go.services.communication.dzen/app/ClickDashboard/pkg/config"
 )
 
 func testLogger() *slog.Logger {
@@ -60,14 +61,23 @@ func (m *mockClient) rangeCall() (time.Time, time.Time, int) {
 	return m.gotFrom, m.gotTo, m.calls
 }
 
+func testProjection(maxDays int) config.Projection {
+	return config.Projection{
+		MaxDays:         maxDays,
+		RefreshInterval: time.Minute,
+		// Короткие паузы, чтобы тесты со стартовыми ретраями не ждали секунды.
+		StartupRetryDelays: []time.Duration{time.Millisecond, time.Millisecond},
+	}
+}
+
 func newTestService(client StorageGatewayClient, maxDays int) (*StatsService, *Store) {
 	store := NewStore()
-	svc := NewStatsService(client, store, testLogger(), maxDays, time.Minute)
+	svc := NewStatsService(client, store, testLogger(), testProjection(maxDays))
 	return svc, store
 }
 
 func TestMaxDays(t *testing.T) {
-	svc := NewStatsService(&mockClient{}, NewStore(), testLogger(), 42, time.Minute)
+	svc := NewStatsService(&mockClient{}, NewStore(), testLogger(), testProjection(42))
 	if svc.MaxDays() != 42 {
 		t.Errorf("MaxDays = %d, want 42", svc.MaxDays())
 	}
@@ -295,6 +305,43 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after context cancel")
 	}
+}
+
+// Стартовые ретраи идут по расписанию из конфига: ровно 1 + len(delays)
+// попыток, после исчерпания новых попыток до тика не происходит.
+func TestRun_StartupRetriesFollowSchedule(t *testing.T) {
+	client := &mockClient{authorsErr: errors.New("gateway is down")}
+	svc, _ := newTestService(client, 10) // StartupRetryDelays: 2×1ms → 3 попытки
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		svc.Run(ctx)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, _, calls := client.rangeCall()
+		if calls >= 3 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("startup attempts = %d, want 3", calls)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Расписание исчерпано: до отмены новых попыток не будет
+	// (тику RefreshInterval=1m за 50ms не успеть).
+	time.Sleep(50 * time.Millisecond)
+	if _, _, calls := client.rangeCall(); calls != 3 {
+		t.Fatalf("attempts after schedule = %d, want exactly 3", calls)
+	}
+
+	cancel()
+	<-done
 }
 
 // Конкурентное чтение из атомарного снапшота (запускать с -race).
