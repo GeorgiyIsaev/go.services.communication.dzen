@@ -9,25 +9,33 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type Config struct {
-	// HTTP порт (для ClickCounter)
-	ServerPort string
-	// gRPC порт (для ClickDashboard)
-	GRPCPort string
+type HTTP struct {
+	Port string
+}
+type GRPC struct {
+	Port string
+}
 
-	DBHost     string
-	DBPort     string
-	DBUser     string
-	DBPassword string
-	DBName     string
+type DB struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	Name     string
 
 	// Пул соединений.
-	DBMaxOpenConns    int
-	DBMaxIdleConns    int
-	DBConnMaxLifetime time.Duration
-	DBConnMaxIdleTime time.Duration
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
 
 	MigrationsPath string
+}
+
+type Config struct {
+	HTTP HTTP
+	GRPC GRPC
+	DB   DB
 }
 
 func Load() *Config {
@@ -36,21 +44,26 @@ func Load() *Config {
 	}
 
 	return &Config{
-		ServerPort: getEnv("PORT_CLICK_STORAGE", "8084"),
-		GRPCPort:   getEnv("GRPC_PORT_CLICK_STORAGE", "9084"), // Новый порт
+		HTTP: HTTP{
+			Port: getEnv("STORAGE_GATEWAY_PORT", "8084"),
+		},
+		GRPC: GRPC{
+			Port: getEnv("STORAGE_GATEWAY_GRPC_PORT", "9084"),
+		},
+		DB: DB{
+			Host:     getEnv("DB_HOST", "localhost"),
+			Port:     getEnv("DB_PORT", "5432"),
+			User:     getEnv("DB_USER", "postgres"),
+			Password: getEnv("DB_PASSWORD", ""),
+			Name:     getEnv("DB_NAME", "click_analytics"),
 
-		DBHost:     getEnv("DB_HOST", "localhost"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", ""),
-		DBName:     getEnv("DB_NAME", "click_analytics"),
+			MaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 25),
+			MaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 25),
+			ConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
+			ConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 5*time.Minute),
 
-		DBMaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 25),
-		DBMaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 25),
-		DBConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
-		DBConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 5*time.Minute),
-
-		MigrationsPath: getEnv("MIGRATIONS_PATH", "file://app/StorageGateway/migrations"),
+			MigrationsPath: getEnv("STORAGE_GATEWAY_MIGRATIONS_PATH", "file://app/StorageGateway/migrations"),
+		},
 	}
 }
 

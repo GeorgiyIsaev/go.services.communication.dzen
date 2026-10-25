@@ -14,9 +14,10 @@ import (
 	"go.services.communication.dzen/app/StorageGateway/pkg/config"
 )
 
-func Connect(ctx context.Context, cfg *config.Config) (*sql.DB, error) {
+// Connect подключается к БД, применяет миграции и возвращает готовый пул.
+func Connect(ctx context.Context, cfg config.DB) (*sql.DB, error) {
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName)
+		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Name)
 
 	sqlDB, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -24,10 +25,10 @@ func Connect(ctx context.Context, cfg *config.Config) (*sql.DB, error) {
 	}
 
 	// Настройки пула.
-	sqlDB.SetMaxOpenConns(cfg.DBMaxOpenConns)
-	sqlDB.SetMaxIdleConns(cfg.DBMaxIdleConns)
-	sqlDB.SetConnMaxLifetime(cfg.DBConnMaxLifetime)
-	sqlDB.SetConnMaxIdleTime(cfg.DBConnMaxIdleTime)
+	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
+	sqlDB.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
 
 	if err := sqlDB.PingContext(ctx); err != nil {
 		_ = sqlDB.Close()

@@ -38,7 +38,7 @@ func run(appLogger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	database, err := db.Connect(ctx, cfg)
+	database, err := db.Connect(ctx, cfg.DB)
 	if err != nil {
 		return err
 	}
@@ -58,7 +58,7 @@ func run(appLogger *slog.Logger) error {
 	h = middleware.RequestID(h)
 
 	srv := &http.Server{
-		Addr:              ":" + cfg.ServerPort,
+		Addr:              ":" + cfg.HTTP.Port,
 		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -69,7 +69,7 @@ func run(appLogger *slog.Logger) error {
 	errCh := make(chan error, 2)
 
 	go func() {
-		appLogger.Info("StorageGateway HTTP started", "port", cfg.ServerPort)
+		appLogger.Info("StorageGateway HTTP started", "port", cfg.HTTP.Port)
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -87,12 +87,12 @@ func run(appLogger *slog.Logger) error {
 	pb.RegisterStorageGatewayServer(grpcSrv, grpcHandler)
 
 	go func() {
-		lis, err := net.Listen("tcp", ":"+cfg.GRPCPort)
+		lis, err := net.Listen("tcp", ":"+cfg.GRPC.Port)
 		if err != nil {
 			errCh <- err
 			return
 		}
-		appLogger.Info("StorageGateway gRPC started", "port", cfg.GRPCPort)
+		appLogger.Info("StorageGateway gRPC started", "port", cfg.GRPC.Port)
 		if err := grpcSrv.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			errCh <- err
 		}
