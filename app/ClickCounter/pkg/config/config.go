@@ -23,8 +23,9 @@ type HTTP struct {
 // GroupID намеренно отсутствует: читаем без группы,
 // чтобы StartOffset=FirstOffset применялся при каждом старте.
 type Kafka struct {
-	Brokers []string
-	Topic   string
+	Brokers        []string
+	Topic          string
+	ReadRetryDelay time.Duration // Одиночная задержка для чтения из топика
 }
 
 // Gateway — параметры HTTP-клиента к StorageGateway.
@@ -33,10 +34,6 @@ type Gateway struct {
 	Timeout time.Duration
 }
 
-// Retries — политика ретраев flush в StorageGateway. Используется в service.Sender.
-// Delays — расписание пауз между попытками (по возрастанию): после неудачной
-// попытки ждём Delays[0], затем Delays[1] и т.д.; исчерпание расписания = провал.
-// Пустой Delays = ретраев нет (только одна попытка).
 type Retries struct {
 	Delays []time.Duration
 }
@@ -62,31 +59,30 @@ func Load() *Config {
 
 	return &Config{
 		HTTP: HTTP{
-			Port:              getEnv("PORT_CLICK_COUNTER", "8080"),
-			ReadHeaderTimeout: getEnvDuration("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
-			ReadTimeout:       getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second),
-			WriteTimeout:      getEnvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second),
-			IdleTimeout:       getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
+			Port:              getEnv("CLICK_COUNTER_PORT", "8080"),
+			ReadHeaderTimeout: getEnvDuration("CLICK_COUNTER_HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
+			ReadTimeout:       getEnvDuration("CLICK_COUNTER_HTTP_READ_TIMEOUT", 15*time.Second),
+			WriteTimeout:      getEnvDuration("CLICK_COUNTER_HTTP_WRITE_TIMEOUT", 15*time.Second),
+			IdleTimeout:       getEnvDuration("CLICK_COUNTER_HTTP_IDLE_TIMEOUT", 60*time.Second),
 		},
 		Kafka: Kafka{
 			Brokers: getEnvSlice("KAFKA_BROKERS", []string{
 				"localhost:9092", "localhost:9093", "localhost:9094",
 			}),
-			Topic: getEnv("KAFKA_TOPIC", "clicks"),
+			Topic:          getEnv("KAFKA_TOPIC", "clicks"),
+			ReadRetryDelay: getEnvDuration("CLICK_COUNTER_KAFKA_READ_RETRY_DELAY", time.Second),
 		},
 		Gateway: Gateway{
-			URL:     getEnv("STORAGE_GATEWAY_URL", "http://localhost:8084"),
-			Timeout: getEnvDuration("STORAGE_GATEWAY_TIMEOUT", 10*time.Second),
+			URL:     getEnv("CLICK_COUNTER_STORAGE_GATEWAY_URL", "http://localhost:8084"),
+			Timeout: getEnvDuration("CLICK_COUNTER_STORAGE_GATEWAY_TIMEOUT", 10*time.Second),
 		},
 		Retries: Retries{
-			// Дефолт: экспоненциальные паузы 1+2+4+8 = 15 минут, 5 попыток.
-			// После исчерпания — фиксируем провал в логе и больше не повторяем.
-			Delays: getEnvDurationSlice("FLUSH_RETRY_DELAYS",
+			Delays: getEnvDurationSlice("CLICK_COUNTER_FLUSH_RETRY_DELAYS",
 				[]time.Duration{1 * time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute}),
 		},
 		Scheduler: Scheduler{
-			Hours:  getEnvIntSlice("SCHEDULER_HOURS", []int{0, 1}),
-			Minute: getEnvInt("SCHEDULER_MINUTE", 5),
+			Hours:  getEnvIntSlice("CLICK_COUNTER_SCHEDULER_HOURS", []int{0, 1}),
+			Minute: getEnvInt("CLICK_COUNTER_SCHEDULER_MINUTE", 5),
 		},
 	}
 }

@@ -15,9 +15,6 @@ import (
 )
 
 // ClickMessage — формат сообщения в топике clicks.
-// Контракт зеркалит domain.ClickEvent имитатора: дату клика определяет
-// имитатор и пишет её в timestamp. Поле обязательно: нулевой timestamp =
-// нарушение контракта, сообщение отбрасывается (без fallback'ов).
 type ClickMessage struct {
 	UserID    int64     `json:"user_id"`
 	AuthorID  int64     `json:"author_id"`
@@ -154,7 +151,7 @@ func (c *Consumer) consumePartition(ctx context.Context, partition int, r *kafka
 				return
 			}
 			log.Error("kafka read error", "err", err)
-			time.Sleep(time.Second)
+			time.Sleep(c.cfg.ReadRetryDelay)
 			continue
 		}
 
@@ -181,11 +178,7 @@ func (c *Consumer) consumePartition(ctx context.Context, partition int, r *kafka
 	}
 }
 
-// eventTime возвращает момент клика из контрактного поля timestamp —
-// его определяет имитатор (см. domain.ClickEvent).
-// Нулевое поле = нарушение контракта: (zero, false), сообщение отбрасывается
-// вызывающим. Fallback'ов на время брокера или «сейчас» нет — политика
-// «только контракт, нарушителей отбрасываем».
+// eventTime возвращает момент клика из контрактного поля timestamp (Нулевое поле = нарушение контракта)
 func eventTime(m ClickMessage) (time.Time, bool) {
 	if m.Timestamp.IsZero() {
 		return time.Time{}, false
