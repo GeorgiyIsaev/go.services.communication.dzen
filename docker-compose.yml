@@ -1,6 +1,31 @@
 # docker-compose.yml
 name: communication_services
 
+# ===== Общее для Kafka (якоря): меняется в одном месте =====
+x-kafka-image: &kafka_image confluentinc/cp-kafka:8.3.0
+
+# Общая часть окружения всех брокеров: роли, кворум контроллера, репликация.
+x-kafka-broker-env: &kafka_broker_env
+  KAFKA_PROCESS_ROLES: 'broker,controller'
+  KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:9099,2@kafka2:9099,3@kafka3:9099'
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT'
+  KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
+  KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+
+# Общая часть healthcheck'а брокера (порт проверки свой у каждого — остаётся в сервисе).
+x-kafka-healthcheck: &kafka_healthcheck
+  interval: 10s
+  timeout: 10s
+  retries: 10
+  start_period: 60s
+
+#####################################
+
 services:
 
   click-imitator:
@@ -9,30 +34,28 @@ services:
       dockerfile: app/ClickImitator/Dockerfile
     depends_on:
       kafka-init:
-        condition: service_completed_successfully #ждем создание топика в кафке
+        condition: service_completed_successfully # ждем создание топика в кафке
     environment:
-      KAFKA_BROKERS: "kafka1:19092,kafka2:19093,kafka3:19094"
-      KAFKA_TOPIC: clicks
+      KAFKA_BROKERS: "${KAFKA_BROKERS_INTERNAL:?KAFKA_BROKERS_INTERNAL is required, see .env.template}"
+      KAFKA_TOPIC: "${KAFKA_TOPIC:-clicks}"
       # Режим по умолчанию — random (дефолт и в коде тоже)
-      GENERATOR_MODE: random
+      CLICK_IMITATOR_GENERATOR_MODE: random
       # Random-параметры (дефолты можно переопределять при запуске)
-      AUTHOR_ID_START: 1
-      AUTHOR_ID_END: 100
-      READER_ID_START: 1
-      READER_ID_END: 100
-      MIN_READS: 5
-      MAX_READS: 20
-      DELAY_BETWEEN_READS_SEC: 2
-      # Scenario-параметры
-      SCENARIO_DIR: /app/scenarios
+      CLICK_IMITATOR_AUTHOR_ID_START: 1
+      CLICK_IMITATOR_AUTHOR_ID_END: 100
+      CLICK_IMITATOR_READER_ID_START: 1
+      CLICK_IMITATOR_READER_ID_END: 100
+      CLICK_IMITATOR_MIN_READS: 5
+      CLICK_IMITATOR_MAX_READS: 20
+      CLICK_IMITATOR_DELAY_BETWEEN_READS_SEC: 2
       # Sender
-      MAX_RETRIES: 5
-      SEND_TIMEOUT: 5s
-      LOG_LEVEL: info
+      CLICK_IMITATOR_SEND_RETRY_DELAYS: "500ms,1s,2s,4s"
+      CLICK_IMITATOR_SEND_TIMEOUT: 5s
+      CLICK_IMITATOR_LOG_LEVEL: info
     networks:
       - kafka-net
     profiles:
-      - tools      # Запускается явно: `docker compose run --rm click-imitator`
+      - tools      # Запускается явно: `docker compose run --rm --build click-imitator`
 
   click-counter:
     build:
@@ -45,17 +68,15 @@ services:
       kafka-init:
         condition: service_completed_successfully # ждем создание топика в кафке
     environment:
-      PORT_CLICK_COUNTER: 8080
-      KAFKA_BROKERS: "kafka1:19092,kafka2:19093,kafka3:19094"   # INTERNAL-порты kafka (19092/19093/19094), НЕ внешние 9092/9093/9094!
-      KAFKA_TOPIC: clicks
-      STORAGE_GATEWAY_URL: http://storage-gateway:8084 # HTTP
-      STORAGE_GATEWAY_TIMEOUT: "10s"
-      MAX_RETRIES: 5
-      RETRY_DELAY: "1m"
-      LONG_RETRY_DELAY: "30m"
-      MAX_FLUSH_DURATION: "2h"
-      SCHEDULER_HOURS: "0,1"
-      SCHEDULER_MINUTE: 5
+      CLICK_COUNTER_PORT: 8080
+      # INTERNAL-порты kafka (19092/19093/19094), НЕ внешние 9092/9093/9094!
+      KAFKA_BROKERS: "${KAFKA_BROKERS_INTERNAL:?KAFKA_BROKERS_INTERNAL is required, see .env.template}"
+      KAFKA_TOPIC: "${KAFKA_TOPIC:-clicks}"
+      CLICK_COUNTER_STORAGE_GATEWAY_URL: http://storage-gateway:8084 # HTTP
+      CLICK_COUNTER_STORAGE_GATEWAY_TIMEOUT: "10s"
+      CLICK_COUNTER_FLUSH_RETRY_DELAYS: "1m,2m,4m,8m"
+      CLICK_COUNTER_SCHEDULER_HOURS: "0,1"
+      CLICK_COUNTER_SCHEDULER_MINUTE: 5
     ports:
       - "8080:8080"
     networks:
@@ -77,11 +98,11 @@ services:
       storage-gateway:
         condition: service_healthy         # ждем healthy от storage-gateway
     environment:
-      PORT_CLICK_DASHBOARD: 8085
-      STORAGE_GATEWAY_ADDR: storage-gateway:9084
-      STORAGE_GATEWAY_TIMEOUT: "10s"
-      MAX_DAYS: 30
-      REFRESH_INTERVAL: "30s"  # Для прода "5m" или даже 30м (обновление проекции)
+      CLICK_DASHBOARD_PORT: 8085
+      CLICK_DASHBOARD_STORAGE_GATEWAY_ADDR: storage-gateway:9084
+      CLICK_DASHBOARD_STORAGE_GATEWAY_TIMEOUT: "10s"
+      CLICK_DASHBOARD_MAX_DAYS: 30
+      CLICK_DASHBOARD_REFRESH_INTERVAL: "30s"  # Для прода "5m" или даже 30м (обновление проекции)
     ports:
       - "8085:8085"
     networks:
@@ -108,9 +129,9 @@ services:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
-      PORT_CLICK_STORAGE: 8084
-      GRPC_PORT_CLICK_STORAGE: 9084
-      MIGRATIONS_PATH: file:///app/migrations
+      STORAGE_GATEWAY_PORT: 8084
+      STORAGE_GATEWAY_GRPC_PORT: 9084
+      STORAGE_GATEWAY_MIGRATIONS_PATH: file:///app/migrations
     ports:
       - "8084:8084"    # HTTP
       - "9084:9084"    # gRPC
@@ -125,104 +146,68 @@ services:
       start_period: 10s
 
   kafka1:
-    image: confluentinc/cp-kafka:latest
+    image: *kafka_image
     container_name: kafka1
     ports:
       - "9092:9092"
     environment:
+      <<: *kafka_broker_env
       KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:9099,2@kafka2:9099,3@kafka3:9099'
       KAFKA_LISTENERS: 'INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9099'
       KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka1:19092,EXTERNAL://localhost:9092'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
-      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-      KAFKA_MIN_INSYNC_REPLICAS: 2
     networks:
       - kafka-net
     volumes:
       - kafka1_data:/var/lib/kafka/data
     healthcheck:
+      <<: *kafka_healthcheck
       test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1 || exit 1" ]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
 
   kafka2:
-    image: confluentinc/cp-kafka:latest
+    image: *kafka_image
     container_name: kafka2
     ports:
       - "9093:9093"
     environment:
+      <<: *kafka_broker_env
       KAFKA_NODE_ID: 2
-      KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:9099,2@kafka2:9099,3@kafka3:9099'
       KAFKA_LISTENERS: 'INTERNAL://:19093,EXTERNAL://:9093,CONTROLLER://:9099'
       KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka2:19093,EXTERNAL://localhost:9093'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
-      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-      KAFKA_MIN_INSYNC_REPLICAS: 2
     networks:
       - kafka-net
     volumes:
       - kafka2_data:/var/lib/kafka/data
     healthcheck:
+      <<: *kafka_healthcheck
       test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9093 > /dev/null 2>&1 || exit 1" ]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
 
   kafka3:
-    image: confluentinc/cp-kafka:latest
+    image: *kafka_image
     container_name: kafka3
     ports:
       - "9094:9094"
     environment:
+      <<: *kafka_broker_env
       KAFKA_NODE_ID: 3
-      KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:9099,2@kafka2:9099,3@kafka3:9099'
       KAFKA_LISTENERS: 'INTERNAL://:19094,EXTERNAL://:9094,CONTROLLER://:9099'
       KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka3:19094,EXTERNAL://localhost:9094'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
-      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-      KAFKA_MIN_INSYNC_REPLICAS: 2
     networks:
       - kafka-net
     volumes:
       - kafka3_data:/var/lib/kafka/data
     healthcheck:
+      <<: *kafka_healthcheck
       test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9094 > /dev/null 2>&1 || exit 1" ]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
 
   # Опционально: веб-интерфейс для Kafka
   kafka-ui:
-    image: ghcr.io/kafbat/kafka-ui:latest
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0   # зафиксировано (эквивалент текущего latest)
     container_name: kafka-ui
     ports:
-      - "8182:8080"
+      - "8200:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: 'kafka1:19092,kafka2:19093,kafka3:19094'
+      KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: "${KAFKA_BROKERS_INTERNAL:?KAFKA_BROKERS_INTERNAL is required, see .env.template}"
       DYNAMIC_CONFIG_ENABLED: "true"
     depends_on:
       - kafka1
@@ -238,7 +223,7 @@ services:
       start_period: 30s
 
   kafka-init:
-    image: confluentinc/cp-kafka:latest
+    image: *kafka_image
     container_name: kafka_init
     depends_on:
       kafka1:
@@ -251,17 +236,17 @@ services:
     command:
       - |
         set -e
-        echo ">>> Creating topic clicks (idempotent)..."
-        kafka-topics --bootstrap-server kafka1:19092,kafka2:19093,kafka3:19094 \
+        echo ">>> Creating topic ${KAFKA_TOPIC:-clicks} (idempotent)..."
+        kafka-topics --bootstrap-server ${KAFKA_BROKERS_INTERNAL:?KAFKA_BROKERS_INTERNAL is required, see .env.template} \
           --create --if-not-exists \
-          --topic clicks \
-          --partitions 8 \
-          --replication-factor 3 \
-          --config retention.ms=172800000 \
-          --config segment.ms=86400000
+          --topic ${KAFKA_TOPIC:-clicks} \
+          --partitions ${KAFKA_PARTITIONS:-8} \
+          --replication-factor ${KAFKA_REPLICATION_FACTOR:-3} \
+          --config retention.ms=${KAFKA_RETENTION_MS:-172800000} \
+          --config segment.ms=${KAFKA_SEGMENT_MS:-86400000}
         echo ">>> Topic state:"
-        kafka-topics --bootstrap-server kafka1:19092 \
-          --describe --topic clicks
+        kafka-topics --bootstrap-server ${KAFKA_BROKERS_INTERNAL} \
+          --describe --topic ${KAFKA_TOPIC:-clicks}
     networks:
       - kafka-net
     restart: "no"
