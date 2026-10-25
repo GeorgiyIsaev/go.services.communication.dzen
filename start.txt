@@ -81,8 +81,8 @@ docker compose run --rm --build `
 # 0. Снести volume'ы + удалить собранные образы и кеш
 docker compose down -v --rmi local
 
-# 1. Имитация кликов (с параметрами из compose, ~100 читателей)
-docker compose up -d
+# 1. Запуск docker compose
+docker compose up --build -d
 
 # 2. Запустить сценарий или рандом
 docker compose run --rm --build `
